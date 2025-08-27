@@ -1,0 +1,77 @@
+KPI Analizi Sayfası: Mimari ve Tasarım Planı
+
+Amaç: Kullanıcıya, analiz etmek istediği temel performans göstergesini (KPI) seçme gücü veren ve seçilen bu metriği, farklı "mercekler" (boyutlar) altında derinlemesine incelemesini sağlayan dinamik ve interaktif bir sayfa oluşturmak. Bu sayede kullanıcı, "Neden?" sorusunun cevabını kendi kendine bulabilir.
+
+Bölüm 1: "Gövde" (Frontend) - KPI Analiz Sayfasının Tasarımı
+
+Merve bu sayfaya girdiğinde onu, bir veri analistinin çalışma masası gibi, adım adım yönlendiren 4 ana bölüm karşılayacak:
+
+1. Bölüm: "Merceğini Seç" - Ana KPI Seçim Alanı
+
+Tasarım: Sayfanın en üstünde, şık ve tıklanabilir kartlardan oluşan bir şerit. Her kart, bir anahtar performans göstergesini (KPI) temsil eder.
+
+İçerik:
+
+Ciro ROAS Müşteri Edinme Maliyeti (CPA) Ortalama Sepet Değeri (AOV) Dönüşüm Oranı Müşteri Yaşam Boyu Değeri (LTV)
+
+İnteraktivite: Merve bir karta tıkladığında, o kart aktif hale gelir ve sayfanın geri kalanı anında o metriğe göre güncellenir.
+
+2. Bölüm: "Büyük Resmi Gör" - Zaman Serisi Grafiği
+
+Tasarım: Merve bir KPI seçtiğinde, hemen altında o metriğin seyrini gösteren büyük, net ve interaktif bir çizgi grafiği belirir.
+
+İçerik:
+
+Grafik: Seçilen KPI'ın son 30/90 gün içindeki günlük veya haftalık değişimi.
+
+Tarih Seçici: Grafiğin sağ üst köşesinde, kullanıcının "Son 7 Gün", "Son 30 Gün", "Bu Çeyrek" gibi farklı zaman aralıkları seçebileceği bir buton bulunur.
+
+İnteraktivite: Merve, faresini grafiğin üzerinde gezdirdiğinde, o güne ait tam rakamı görebilir.
+
+3. Bölüm: "Detaylara İn" - Boyutlara Göre Kırılım
+
+Tasarım: Grafiğin altında, seçilen KPI'ın detaylı dökümünü gösteren, sekmeli bir yapı. Her sekme, veriyi farklı bir "mercekle" analiz eder.
+
+İçerik Sekmeleri:
+
+Kanala Göre: Seçilen KPI'ın Google, Meta, TikTok gibi kanallardaki performansını karşılaştıran bir bar grafiği.
+
+Kampanyaya Göre: Hangi kampanyanın o KPI'ı pozitif veya negatif etkilediğini gösteren, sıralanabilir bir tablo.
+
+Ürüne Göre: Hangi ürünlerin o KPI'a en çok katkı sağladığını gösteren bir tablo.
+
+Hedef Kitleye Göre: Hangi hedef kitlenin o KPI açısından en verimli olduğunu ortaya koyan bir bar grafiği.
+
+İnteraktivite: Merve sekmeler arasında geçiş yaptığında, içerik anında değişir ve seçtiği boyuta göre yeni bir analiz sunulur.
+
+4. Bölüm: "Yapay Zeka Yorumlasın" - Otomatik İçgörü
+
+Tasarım: Merve'nin baktığı her grafik ve tablonun yanında, durumu insan dilinde özetleyen bir metin kutusu.
+
+İçerik: Gemini motorumuz, Merve'nin seçtiği KPI ve kırılıma bakarak, en önemli bulguyu ve potansiyel aksiyonu ona bir veya iki cümleyle anlatır.
+
+"İçgörü (CPA x Kanala Göre): Son 30 günde Müşteri Edinme Maliyetiniz (CPA) genel olarak iyi seviyede. Ancak bu maliyetin en büyük kaynağı, 250 TL CPA ile çalışan 'Google Arama - Genel Terimler' kampanyası gibi görünüyor. Buna karşılık, 'Instagram - Yeniden Pazarlama' kitleniz 80 TL gibi çok düşük bir maliyetle müşteri kazandırmaya devam ediyor."
+
+Bölüm 2: "Beyin" (Backend) - Bu Sayfa Replit'te Nasıl Çalışacak?
+
+Bu interaktif deneyimi, tamamen Replit'in ücretsiz imkanlarıyla ve gelecekte kolayca ölçeklenebilecek bir yapıyla inşa edeceğiz.
+
+Adım 1: Veri Kaynağı: Büyük veri ambarı (BigQuery) yerine, Replit projemizin içinde JSON dosyaları veya Replit'in kendi basit veritabanı (Replit DB) özelliğini kullanacağız. "Merkezi Veri Motorumuz", Shopify ve Meta'dan çektiği temizlenmiş "altın veriyi" bu basit ve hızlı veritabanına kaydedecek. Bu, ilk yüzlerce müşterimiz için fazlasıyla yeterlidir ve tamamen ücretsizdir.
+
+Adım 2: Dinamik Sorgu Motoru: Arka planda çalışacak olan Python kodumuz, Replit içinde Flask adında basit ve güçlü bir web sunucusu çalıştıracak. Merve arayüzde bir butona tıkladığında, JavaScript kodu bu Flask sunucusuna bir istek gönderecek. Python kodumuz, bu isteğe göre Replit DB'deki veriyi analiz edecek ve sonucu üretecek.
+
+Adım 3: Akıllı Önbelleğe Alma (Caching): Bu aşamada karmaşık önbellek sistemlerine ihtiyacımız yok. Sık kullanılan hesaplamaların sonuçlarını, Python kodumuzun hafızasında geçici olarak tutarak (basit bir "dictionary" içinde), uygulamayı hızlı tutabiliriz.
+
+Adım 4: API Servisi ve Gemini Entegrasyonu:
+
+Netlify/Vercel gibi harici bir platforma gerek yok. Replit'in içinde çalışan Flask sunucumuz, bizim API servisimiz olacak.
+
+Ön yüz (JavaScript), Replit'in bize verdiği yerel bir adrese ("localhost") istek gönderecek.
+
+Flask sunucumuz, bu isteği alacak, Replit DB'den veriyi çekecek, gerekirse Gemini API'ına bağlanıp "Yapay Zeka Yorumunu" alacak ve tüm sonucu birleştirerek ön yüze geri gönderecek.
+
+Bu Sistem Böyle Kalabilir mi?
+Evet! Bu mimari, sadece bir başlangıç değil, aynı zamanda yüzlerce, hatta binlerce KOBİ'ye hizmet verebilecek kadar sağlam bir temeldir. Replit'in ücretli planlarına geçtiğimizde, bu sistemin işlem gücünü artırarak çok uzun bir süre, başka hiçbir platforma ihtiyaç duymadan ilerleyebiliriz. Gelecekte milyonlarca kullanıcıya ulaştığımızda ise, bu aynı mantığı Google Cloud'a taşımak çok daha kolay olacaktır.
+
+Bu mimari, Merve'ye sadece bir rapor sunmakla kalmaz, ona bir veri analisti gücü ve yeteneği verir. Bu, platformumuzu KOBİ'ler için vazgeçilmez bir "kendi kendine yardım" aracı haline getirir.
+

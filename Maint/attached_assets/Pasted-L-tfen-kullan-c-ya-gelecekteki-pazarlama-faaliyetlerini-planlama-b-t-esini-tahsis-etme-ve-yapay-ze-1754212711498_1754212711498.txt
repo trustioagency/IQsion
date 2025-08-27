@@ -1,0 +1,24 @@
+Lütfen, kullanıcıya gelecekteki pazarlama faaliyetlerini planlama, bütçesini tahsis etme ve yapay zeka destekli stratejileri tek tıkla uygulama gücü veren, kapsamlı ve interaktif bir "Strateji ve Planlama" sayfası inşa et.
+Sayfanın mimarisi ve işlevselliği aşağıdaki gibi olmalıdır:
+Bölüm 1: Planlama Ufku Seçimi
+Sayfanın en üstünde, kullanıcının strateji yapmak istediği zaman aralığını seçebileceği, belirgin ve tıklanabilir butonlar bulunsun. Bu butonlar:
+"Haftalık Plan"
+"Aylık Plan"
+"3 Aylık (Çeyrek) Plan"
+Kullanıcının yaptığı seçim, sayfanın geri kalanındaki tüm öneri ve verileri dinamik olarak güncellemelidir.
+Bölüm 2: Yapay Zeka Strateji Önerileri
+Bu bölümde, sistem kullanıcının tüm verilerini (satışlar, reklam performansı, kârlılık) ve en başta verdiği "Marka DNA'sı" bilgilerini analiz etmelidir. Bu analize dayanarak, seçilen zaman ufkuna ve kullanıcının ana hedefine (Kârlılık, Büyüme vb.) uygun 2-3 adet alternatif strateji senaryosu oluşturup, bunları birer kart olarak sun.
+Her bir strateji kartı şunları içermelidir:
+Strateji Adı: Örneğin, "Güvenli Büyüme Planı" veya "Agresif Pazar Payı Kapma Planı".
+Kısa Açıklama: Stratejinin ana hedefini ve yaklaşımını özetleyen bir veya iki cümle.
+Anahtar Metrikler: O strateji için öngörülen Toplam Bütçe, Tahmini Ciro ve Tahmini ROAS gibi en önemli rakamlar.
+Güven Skoru: Yapay zekanın bu planın başarısına ne kadar güvendiğini gösteren bir yüzde (%92 Güven gibi).
+Bölüm 3: Medya ve Bütçe Planı Detayları
+Kullanıcı, yukarıdaki strateji senaryolarından birine tıkladığında, sayfanın bu bölümü seçilen stratejinin detaylarıyla dolmalıdır.
+Bütçe Dağılımı: Seçilen strateji için önerilen toplam bütçenin, kanallar (Google, Meta, TikTok vb.) arasında nasıl paylaştırıldığını gösteren, anlaşılır bir halka (donut) grafik göster.
+Aksiyon Takvimi: Seçilen planın zaman içindeki ana adımlarını gösteren basit ve görsel bir zaman çizelgesi oluştur. (Örn: 1-7. Günler: Bilinirlik kampanyaları, 8-20. Günler: Dönüşüm odaklı reklamlar vb.)
+Bölüm 4: Otomatik Uygulama
+Her strateji planı detayının altında, büyük ve net bir "Bu Planı Onayla ve Otomatik Başlat" butonu olmalıdır. Bu butona tıklandığında, sistemin arka planda gerekli tüm kampanyaları, hedef kitleleri ve bütçeleri otomatik olarak oluşturacağını simüle eden bir onay ekranı göster.
+Bölüm 5: Performans Takibi (Plan vs. Gerçekleşen)
+Bir plan onaylanıp başlatıldıktan sonra, bu sayfa bir takip paneline dönüşmelidir. Bu panelde, planın hedeflerini (Örn: Planlanan Ciro: 500.000 TL) ve o anki gerçekleşen sonuçları (Örn: Gerçekleşen Ciro: 550.000 TL) yan yana, ilerleme çubukları veya göstergelerle göstererek, planın ne kadar başarılı olduğunu görsel olarak sun.
+Bu merkez, kullanıcıya sadece geçmişi analiz etme değil, aynı zamanda geleceği veriye dayalı olarak planlama ve otomatize etme gücü verecektir.

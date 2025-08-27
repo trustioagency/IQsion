@@ -1,0 +1,96 @@
+Genel Kârlılık Paneli: Mimari ve Tasarım Planı
+
+Amaç: Merve'ye, reklam ve ciro metriklerinin ötesinde, işinin gerçek finansal sağlığını bir bakışta gösteren, basit, anlaşılır ve eyleme geçirilebilir bir panel sunmak.
+
+Bölüm 1: "Beyin" (Backend) - Kârlılık Algoritması Nasıl Çalışacak?
+
+Bu panelin arkasındaki zeka, backend_technical_docs_v1'de kurduğumuz Merkezi Veri Motoru'nun üzerine inşa edilecek.
+
+Adım 1: Yeni Veri Noktalarını Çekme
+Mevcut veri çekme script'lerimize ek olarak, Python kodlarımız Shopify API'ından şu kritik finansal verileri de çekecek:
+
+Satılan Malın Maliyeti (COGS): Her bir ürünün Merve'ye olan maliyeti.
+
+İşlem Ücretleri (Transaction Fees): Shopify Payments, Stripe gibi ödeme sağlayıcılarının aldığı komisyonlar.
+
+Kargo ve Lojistik Maliyetleri: Eğer Shopify'da tanımlıysa, kargo ücretleri ve iade maliyetleri.
+
+Adım 2: Net Kâr Hesaplama Algoritması
+Arka planda, belirli periyotlarla (örneğin günde bir kez) çalışacak bir Python algoritması, BigQuery'deki birleşik veri setimiz üzerinde şu hesaplamaları yapacak:
+
+Brüt Satış Geliri (Gross Revenue): Shopify'dan gelen toplam ciro.
+
+Brüt Kâr (Gross Profit): Brüt Satış Geliri - Satılan Malın Maliyeti (COGS).
+
+Pazarlama Giderleri: Meta Harcaması + Google Harcaması + TikTok Harcaması.
+
+İşlem Giderleri: İşlem Ücretleri + Kargo Maliyetleri.
+
+Net Kâr (Net Profit): Brüt Kâr - Pazarlama Giderleri - İşlem Giderleri.
+
+Adım 3: Kârlılığı Boyutlara Ayırma
+En sihirli kısım burası. Algoritma, bu net kârı, "Tekil Müşteri Profili" verimizi kullanarak farklı boyutlara göre paylaştıracak:
+
+Kanala Göre Net Kâr: "Google Ads'den gelen müşteriler, tüm maliyetler düşüldükten sonra bize net ne kadar para bıraktı?"
+
+Ürüne Göre Net Kâr: "Hangi ürünümüz en yüksek net kâr marjına sahip?"
+
+Müşteri Segmentine Göre Net Kâr: "Yeni müşterilerden mi yoksa tekrar eden müşterilerden mi daha çok net kâr elde ediyoruz?"
+
+Bu hesaplanmış sonuçlar, hızlı erişim için genel_karlilik adında yeni bir tabloya kaydedilecek.
+
+Bölüm 2: "Gövde" (Frontend) - Kârlılık Panelinin Tasarımı
+
+Merve, bu karmaşık hesaplamaları görmeyecek. O, sadece sonuçları, hikaye anlatan bir arayüzde görecek. Panel 3 ana bölümden oluşacak:
+
+1. Bölüm: "Hayat Pompası" - Ana Kârlılık Metrikleri
+
+Tasarım: Panelin en üstünde, büyük, canlı ve bir bakışta anlaşılır 4 ana kart.
+
+İçerik:
+
+Brüt Satış Geliri: (Örn: 450.000 TL)
+
+Pazarlama Giderleri: (Örn: 80.000 TL)
+
+Brüt Kâr: (Örn: 220.000 TL)
+
+Net Kâr (Cebine Kalan): Büyük, yeşil veya kırmızı renkte, işin o anki sağlığını gösteren en önemli rakam. (Örn: + 95.000 TL)
+
+2. Bölüm: "Kârın Kaynağı" - Kanallara Göre Net Kâr Dağılımı
+
+Tasarım: Basit ve renkli bir "donut" (halka) grafiği.
+
+İçerik: Toplam net kârın hangi kanallardan geldiğini yüzdesel olarak gösterir. Merve, faresini bir dilimin üzerine getirdiğinde, o kanalın getirdiği net kârı TL olarak görür.
+
+Google Ads: %50 (47.500 TL)
+
+Meta Ads: %35 (33.250 TL)
+
+Organik & Direkt: %15 (14.250 TL)
+
+3. Bölüm: "Yıldızlar ve Yükler" - Ürünlere Göre Net Kâr Analizi
+
+Tasarım: Basit, sıralanabilir bir tablo.
+
+İçerik: Merve'nin en çok ve en az net kâr getiren ürünlerini gösterir.
+
+En Kârlı Ürünler (Yıldızlar):
+
+Yüksek Bel Siyah Bikini: Net Kâr Marjı %65
+
+Tropikal Desenli Tek Parça: Net Kâr Marjı %58
+
+En Az Kârlı Ürünler (Yükler):
+
+Plaj Havlusu: Net Kâr Marjı %15 (Yüksek iade oranı nedeniyle)
+
+Güneş Gözlüğü: Net Kâr Marjı %12 (Yüksek reklam maliyeti nedeniyle)
+
+Yapay Zeka Yorumu:
+Her bölümün yanında, Gemini motorumuzun ürettiği, durumu özetleyen bir metin kutusu olacak:
+
+"Özet: Merve, bu ay cebine net 95.000 TL kâr kaldı, tebrikler! Kârının en büyük kaynağı Google Ads. Ancak, 'Plaj Havlusu'nun yüksek iade oranları kârlılığını aşağı çekiyor. Bu ürünün iade nedenlerini incelemeyi düşünebilirsin."
+
+Bu panel, Merve'yi ciro odaklı bir satıcıdan, kâr odaklı bir CEO'ya dönüştürecek en güçlü aracımız olacak.
+

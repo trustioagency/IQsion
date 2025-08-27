@@ -1,0 +1,53 @@
+Bu komut, "Strateji ve Planlama" modülünü iki ayrı ve net adımda düzeltmek için tasarlanmıştır. Lütfen her adımı sırasıyla ve eksiksiz uygula.
+
+ADIM 1: ÖNCE SADECE SOL MENÜYÜ DÜZELT
+
+Talimat: Şimdi sadece sol menü (sidebar) dosyası üzerinde çalış. Başka hiçbir dosyaya veya sayfaya dokunma.
+
+"Medya Planlama" adındaki menü öğesini sol menüden tamamen sil.
+
+Mevcut "Strateji" menü öğesinin adını "Strateji ve Planlama" olarak değiştir.
+
+Bu adımı tamamladığında onayla, sonra ikinci adıma geçeceğiz.
+
+ADIM 2: SONRA SAYFA İÇERİĞİNİ KONTROL ET VE İNŞA ET
+
+Talimat: Şimdi, Adım 1'de düzenlediğimiz "Strateji ve Planlama" linkine tıklandığında açılan sayfanın içeriğinin, aşağıdaki gibi olduğundan emin ol ve eksik kısımları inşa et.
+
+Bu sayfa, kullanıcının stratejik kararlar almasını sağlayan, modüler ve interaktif bir yapıda olmalıdır.
+
+Bölüm 1: Planlama Ufku Seçimi
+
+Sayfanın en üstüne, kullanıcının plan yapmak istediği zaman aralığını seçebileceği butonlar ekle: "Haftalık Plan", "Aylık Plan", "3 Aylık (Çeyrek) Plan". Kullanıcının seçimi, aşağıdaki tüm modüllerin içeriğini etkilemelidir.
+
+Bölüm 2: Yapay Zeka Strateji Önerileri
+
+Bu bölümde, sistem kullanıcının tüm verilerini ve marka kimliğini analiz etmelidir.
+
+Bu analize dayanarak, seçilen zaman ufkuna ve kullanıcının ana hedefine uygun 2-3 adet alternatif strateji senaryosu oluşturup, bunları birer kart olarak sun. Örneğin:
+
+Senaryo A: "Güvenli Büyüme Planı" (Daha düşük bütçe, kanıtlanmış kanallara odaklanma, yüksek kârlılık hedefi).
+
+Senaryo B: "Agresif Pazar Payı Kapma Planı" (Daha yüksek bütçe, yeni kitlelere açılma, ciro odaklı hedef).
+
+Bölüm 3: Medya ve Bütçe Planı Detayları
+
+Kullanıcı, yukarıdaki strateji senaryolarından birini seçtiğinde, bu bölüm o senaryonun detaylarıyla dolmalıdır.
+
+Bütçe Dağılımı: Seçilen strateji için önerilen toplam bütçenin, kanallar arasında nasıl paylaştırıldığını gösteren bir halka (donut) grafik göster.
+
+Aksiyon Takvimi: Seçilen planın zaman içindeki ana adımlarını gösteren basit bir zaman çizelgesi oluştur. (Örn: 1-7. Günler: Bilinirlik, 8-20. Günler: Dönüşüm vb.)
+
+Bölüm 4: Otomatik Uygulama
+
+Her strateji planı detayının altında, büyük ve net bir "Bu Planı Onayla ve Otomatik Başlat" butonu olmalıdır.
+
+Bu butona tıklandığında, sistemin arka planda gerekli tüm kampanyaları, hedef kitleleri ve bütçeleri otomatik olarak oluşturacağını simüle eden bir onay ekranı göster.
+
+Bölüm 5: Performans Takibi (Plan vs. Gerçekleşen)
+
+Bir plan başlatıldıktan sonra, bu sayfa bir takip paneline dönüşmelidir.
+
+Planın hedeflerini (Örn: Planlanan Ciro: 500.000 TL) ve o anki gerçekleşen sonuçları (Örn: Gerçekleşen Ciro: 550.000 TL) yan yana göstererek, planın ne kadar başarılı olduğunu görsel olarak sun.
+
+Bu yeni merkez, kullanıcıya sadece geçmişi analiz etme değil, aynı zamanda geleceği veriye dayalı olarak planlama ve otomatize etme gücü verecektir.

@@ -1,0 +1,42 @@
+Ekran Tasarımı: "Atıflandırma Komuta Merkezi"
+
+Sayfa, Merve'yi adım adım yönlendiren 4 ana modülden oluşacak:
+
+1. Modül: "Bakış Açını Seç" - Atıflandırma Modeli Seçimi
+
+Tasarım: Sayfanın en üstünde, basit ve anlaşılır butonlardan oluşan bir seçici.
+
+İçerik: Merve, pazarlama verilerine hangi "gözlükle" bakmak istediğini buradan seçecek:
+
+Son Tıklama: (Varsayılan olarak bu seçili olabilir, çünkü en yaygın olan budur) "Satışı tamamlayan son adımı ödüllendirir."
+
+İlk Tıklama: "Müşteriyi seninle ilk tanıştıran adımı ödüllendirir."
+
+Lineer Model: "Yolculuktaki tüm adımlara eşit pay verir."
+
+⭐ Akıllı Model (Bizim Zekamız): "Her adımın gerçek etkisini, verilerine dayanarak bilimsel olarak hesaplar. (Önerilen)"
+
+2. Modül: "Hazine Dağılımı" - Ciro Dağılımı Grafiği
+
+Tasarım: Merve yukarıdan bir model seçtiği anda, bu bölümdeki büyük ve dinamik bir bar grafiği animasyonla değişecek.
+
+İçerik: Bu grafik, toplam cironun seçilen modele göre kanallar arasında nasıl dağıtıldığını gösterir. Merve, "Son Tıklama"dan "Akıllı Model"e geçtiğinde, Instagram'ın payının %10'dan %35'e fırladığını, Google'ın payının ise %60'tan %40'a düştüğünü görsel olarak anında fark edecek. Bu "Aha!" anıdır.
+
+3. Modül: "Altın Patikalar" - En Yaygın Müşteri Yolculukları
+
+Tasarım: Sayfanın en can alıcı kısmı. Bir akış şeması (Sankey diyagramı) gibi, müşterilerin satın almaya giden en popüler 3-5 rotasını görselleştirir.
+
+İçerik: Merve, müşterilerinin izlediği gerçek yolları görecek:
+
+Yol 1 (%40 Dönüşüm): Instagram Reklamı -> Ürün Sayfası Ziyareti -> 3 Gün Sonra Google'da Marka Araması -> Satın Alma
+
+Yol 2 (%25 Dönüşüm): TikTok Videosu -> Anasayfa Ziyareti -> E-posta Aboneliği -> 2 Hafta Sonra E-posta Kampanyası Tıklaması -> Satın Alma
+Bu, Merve'ye hangi kanalların birbiriyle paslaştığını ve takım oyunu oynadığını gösterir.
+
+4. Modül: "Yapay Zeka Stratejisti" - Otomatik İçgörü
+
+Tasarım: Tüm bu grafiklerin yanında, her şeyi özetleyen basit bir metin kutusu.
+
+İçerik: Gemini motorumuz, Merve'nin seçtiği modele ve grafiklere bakarak, durumu insan dilinde yorumlar:
+
+"Özet (Akıllı Model): Merve, verilerin 'Son Tıklama' modelinin seni yanılttığını gösteriyor. Instagram, satıştan hemen önce görünmese de, en değerli müşterilerinin %40'ını yolculuğun en başında tanıştıran kahraman. Google ise, bu tanışmadan sonra müşterilerin karar vermesini sağlayan 'asist'i yapan oyuncu. Instagram'daki marka bilinirliği reklamlarını kesersen, Google'daki satışların da bir süre sonra düşebilir."

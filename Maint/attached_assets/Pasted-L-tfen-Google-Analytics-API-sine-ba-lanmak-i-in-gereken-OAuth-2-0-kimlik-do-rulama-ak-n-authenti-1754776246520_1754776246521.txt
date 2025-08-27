@@ -1,0 +1,25 @@
+Lütfen Google Analytics API'sine bağlanmak için gereken OAuth 2.0 kimlik doğrulama akışını (authentication flow) yönetecek sunucu (server-side) kodunu oluştur.
+
+Bu kodun şu an için tam olarak test edilemeyeceğini biliyorum çünkü henüz gerçek "Client ID" ve "Client Secret" anahtarlarımız yok. Bu yüzden, bu değerler için kodun içinde `GOOGLE_CLIENT_ID` ve `GOOGLE_CLIENT_SECRET` gibi belirgin placeholder (yer tutucu) değişkenler kullan.
+
+Lütfen aşağıdaki adımları izleyen bir yapı kur:
+
+1.  **Yeni bir Rota Dosyası Oluştur:** Sunucu tarafında, bu mantığı yönetmek için `server/src/routes/googleAuth.ts` adında yeni bir dosya oluştur.
+
+2.  **Bağlantıyı Başlatma Uç Noktası (Endpoint):**
+    * Bu dosyada, `GET /api/auth/google/connect` yoluna cevap veren bir endpoint oluştur.
+    * Bu endpoint'in görevi, kullanıcıyı Google'ın onay ekranına (consent screen) yönlendirecek olan doğru URL'yi oluşturmak ve kullanıcıyı oraya yönlendirmektir. Bu URL, `scope` olarak Google Analytics verilerini okuma iznini (`https://www.googleapis.com/auth/analytics.readonly`) içermelidir.
+
+3.  **Geri Çağırma (Callback) Uç Noktası:**
+    * `GET /api/auth/google/callback` yoluna cevap veren ikinci bir endpoint oluştur. Google, kullanıcı izin verdikten sonra bu adrese yönlendirme yapacak.
+    * Bu endpoint'in görevi:
+        a. Google'dan gelen URL'deki geçici `code` parametresini almak.
+        b. Bu `code` ve bizim placeholder `Client ID/Secret`'ımızı kullanarak Google'ın token sunucusuna bir `POST` isteği göndermek.
+        c. Gelen cevaptan `access_token` ve `refresh_token`'ı ayrıştırmak.
+        d. Şimdilik bu token'ları sadece konsola yazdırmak. (Veritabanına kaydetme işini daha sonra yapacağız).
+        e. İşlem başarılı olursa kullanıcıyı ana panele (`/dashboard`) geri yönlendirmek.
+
+4.  **Ana Sunucuya Entegre Et:**
+    * Oluşturduğun bu yeni `googleAuth.ts` rotasını, ana sunucu dosyası olan `server/src/index.ts` (veya ilgili dosya hangisiyse) içine import et ve kullanılabilir hale getir.
+
+Lütfen bu yapıyı, mevcut Node.js/Express ve TypeScript altyapımızla uyumlu olacak şekilde yaz.

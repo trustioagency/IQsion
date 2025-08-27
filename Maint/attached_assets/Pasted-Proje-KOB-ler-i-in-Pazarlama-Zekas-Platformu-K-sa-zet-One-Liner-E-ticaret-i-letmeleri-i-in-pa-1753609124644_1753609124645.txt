@@ -1,0 +1,55 @@
+Proje: KOBİ'ler için Pazarlama Zekası Platformu
+Kısa Özet (One-Liner)
+
+E-ticaret işletmeleri için pazarlamayı basitleştiren, veri analizini otomatize eden ve kârlılığı en üst düzeye çıkaran, yapay zeka destekli bir "Otonom Büyüme Ortağı".
+
+Çözülen Problem
+
+Günümüzün e-ticaret girişimcileri ("Merve" persona'mız gibi), tutkulu marka sahipleridir, ancak veri analisti veya pazarlama uzmanı değillerdir. Shopify, Meta (Instagram), Google Ads, TikTok gibi birçok farklı platformdan gelen veri yığınları altında ezilirler. Bu durum, üç ana probleme yol açar:
+
+Finansal Belirsizlik: Reklam bütçelerinin nereye gittiğini ve hangi kanalın gerçekten para kazandırdığını net olarak göremezler.
+
+Karar Yorgunluğu: Hangi ürünü öne çıkaracakları, hangi reklamı durduracakları gibi yüzlerce günlük kararı tahminlere dayanarak vermek zorunda kalırlar.
+
+Zaman Kaybı: Değerli zamanlarının çoğunu, anlamadıkları karmaşık paneller arasında gezinerek harcarlar.
+
+Bizim Çözümümüz (Değer Teklifi)
+
+Platformumuz, bu dağınık verileri tek bir "beyinde" birleştirir. Ancak sadece bir raporlama paneli değildir. Temel değeri, pazarlamanın tüm "Karar Döngüsünü" otomatize etmektir:
+
+Teşhis: Tüm kanallardaki performansı analiz eder.
+
+Tespit: Kâr getiren "fırsatları" ve para yakan "riskleri" otomatik olarak bulur.
+
+Tahmin: Olası eylemlerin finansal sonuçlarını simüle eder.
+
+Eylem: Kullanıcıya, insan dilinde, tek tıkla uygulanabilir, akıllı öneriler sunar.
+
+Kısacası, bu platform bir KOBİ sahibine, 7/24 çalışan, sürekli öğrenen bir Yapay Zeka Pazarlama Direktörü (CMO) sağlar.
+
+Hedef Kitle
+
+Öncelikli hedef kitlemiz, kendi pazarlamasını yöneten ancak bunu etkili bir şekilde yapacak zamanı, teknik bilgisi veya uzman ekibi olmayan, özellikle Shopify kullanan küçük ve orta büyüklükteki (KOBİ) e-ticaret markalarıdır.
+
+Ana Özellikler (MVP)
+
+Akıllı Karşılama: Kullanıcının marka DNA'sını ve operasyonel büyüklüğünü anlayan çok adımlı başlangıç süreci.
+
+Otomatik Entegrasyon: Shopify, Meta, Google, TikTok gibi platformların kolayca bağlanması.
+
+Birleşik Ana Panel: Tüm önemli metriklerin (Ciro, Harcama, Kâr) tek bir yerden takibi.
+
+Proaktif Öneri Motoru: Kârı artırmak, maliyeti düşürmek ve verimliliği yükseltmek için tek tıkla uygulanabilir öneriler.
+
+Müşteri Yolculukları Ekranı: Her bir müşterinin, ilk reklam temasından satın almasına kadar olan tüm yolculuğunun görselleştirilmesi.
+
+Derinlemesine Analiz Sayfaları: Kanallar, Ürünler ve KPI'lar özelinde interaktif analiz imkanı.
+
+Strateji Merkezi: Kanıtlanmış pazarlama stratejilerini (örn: Yeniden Pazarlama) tek tıkla kurma ve başlatma.
+
+Teknoloji Mimarisi
+
+Prototip (Mevcut Aşama): HTML, Tailwind CSS, Vanilla JavaScript. Replit üzerinde geliştirilip, GitHub Pages üzerinden test ediliyor.
+
+Nihai Ürün (Gelecek Aşaması): Arka planda Python (FastAPI ile) çalışacak, veri depolama ve analiz için Google BigQuery kullanılacak, yorumlama ve metin üretimi için Google Gemini API'ına bağlanılacak. Ön yüz (Frontend) ise React veya Vue.js gibi modern bir teknolojiyle inşa edilecek ve tüm sistem Google Cloud Run üzerinde çalışacak.
+

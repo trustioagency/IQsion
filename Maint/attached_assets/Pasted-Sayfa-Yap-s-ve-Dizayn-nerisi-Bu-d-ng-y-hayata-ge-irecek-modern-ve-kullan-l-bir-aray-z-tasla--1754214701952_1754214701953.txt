@@ -1,0 +1,77 @@
+Sayfa Yapısı ve Dizayn Önerisi
+
+Bu döngüyü hayata geçirecek modern ve kullanışlı bir arayüz taslağı hazırladım. Arayüzü üç ana bölüme ayırabiliriz:
+
+1. Başlık ve Hesap Seçimi Alanı
+
+Sayfa Başlığı: Büyük, net bir şekilde "Strateji Planlayıcı" yazar.
+
+Hesap Seçimi: Bir dropdown (açılır menü) ile kullanıcının strateji oluşturmak istediği pazarlama hesabını (örn: "Instagram - @kullaniciadi", "Google Ads - Proje X") seçmesini sağlar. Bu, "all-in-one" hedefimiz için kritik.
+
+2. Strateji Zaman Çizelgesi (Ana Panel)
+Bu, sayfanın kalbidir. Kullanıcının hedeflerini görsel olarak planladığı yer. Yatay olarak üç sütuna ayrılmış bir yapı düşünelim:
+
+Kısa Vade (Bu Çeyrek)	Orta Vade (Sonraki Çeyrek)	Uzun Vade (Yıl Sonu)
+Kart 1: Takipçi Artışı	Kart 3: Marka Bilinirliği	Kart 5: Topluluk Oluşturma
+Hedef: Takipçi sayısını %15 artır.	Hedef: Marka adıyla yapılan Google aramalarını %20 artır.	Hedef: 1000 kişilik aktif bir Discord topluluğu kur.
+[Progress Bar %60 Dolu]	[Progress Bar %10 Dolu]	[Progress Bar %0 Dolu]
+Kart 2: Etkileşim Oranı	Kart 4: Web Sitesi Trafiği	
+Hedef: Gönderi başına etkileşim oranını %3'e çıkar.	Hedef: Sosyal medyadan gelen web sitesi trafiğini %25 artır.	
+[Progress Bar %45 Dolu]	[Progress Bar %30 Dolu]	
+[ + Yeni Hedef Ekle ]	[ + Yeni Hedef Ekle ]	[ + Yeni Hedef Ekle ]
+Strateji Kartları: Her bir hedef, sürükle-bırak ile zaman dilimleri arasında taşınabilen bir "kart" olarak temsil edilir.
+
+Her Kartın Üzerinde:
+
+Hedef Başlığı: (Örn: "Takipçi Artışı")
+
+KPI (Anahtar Performans Göstergesi): (Örn: "Takipçi Sayısı")
+
+Mevcut Değer: 10.000 (Bu veri kanaldan otomatik çekilmeli)
+
+Hedef Değer: 11.500 (Kullanıcı girer)
+
+İlerleme Çubuğu (Progress Bar): Mevcut duruma göre hedefin ne kadarının tamamlandığını görsel olarak gösterir.
+
+3. Akıllı Aksiyon Paneli (Sağ Kenar Çubuğu veya Seçilen Kartın Altı)
+Bu bölüm, yapay zekanın sihrini göstereceği yerdir. Kullanıcı yukarıdaki strateji kartlarından birine tıkladığında bu panel o hedefe özel olarak güncellenir.
+
+Diyelim ki kullanıcı "Takipçi Artışı" kartına tıkladı. Aksiyon Paneli şöyle görünür:
+
+Hedef: Takipçi Artışı
+Önerilen Aksiyonlar:
+
+Aksiyon 1: İçerik Önerisi
+
+📝 "Rakiplerinizin en çok etkileşim alan son 5 Reel içeriğini analiz ederek size özel 3 yeni Reel fikri oluşturun."
+
+[ Fikirleri Oluştur (AI) ]
+
+Aksiyon 2: Etkileşim Otomasyonu
+
+🤖 "#pazarlama etiketindeki son 1 saatte paylaşılmış en popüler 10 gönderiye sizin adınıza yorum yapın."
+
+[ Otomatik Uygula ] [ Ayarlar ]
+
+Aksiyon 3: Analiz
+
+📊 "Takipçi artış hızınızın en yüksek olduğu gün ve saatleri analiz edin."
+
+[ Raporu Göster ]
+
+Peki, Bunu Replit'te Nasıl Yapacağız? (Böl ve Yönet Stratejisi)
+
+Bu harika sayfayı tek bir prompt ile oluşturamayız. İşte bu yüzden böl ve yönet felsefemiz devreye giriyor. Bu sayfayı inşa etmek için izleyeceğimiz adımlar:
+
+Adım 0 - VERİ BAĞLANTISI (En Önemli Ön Koşul): Bu sayfadaki hiçbir şey, kanallardan veri çekemediğimiz sürece çalışmaz. Bu nedenle, önce bir önceki adımda sorduğum şeyi yapmalıyız: Tek bir kanala bağlanıp tek bir veriyi çekmeliyiz. (Örn: Instagram'a bağlanıp sadece takipçi sayısını bir yere yazdırmak).
+
+Adım 1 - Statik Arayüzün Kurulumu: Replit'e sadece yukarıda anlattığım görsel yapıyı (sütunlar, boş kartlar, başlık) HTML ve CSS kullanarak oluşturması için bir prompt vereceğiz. Henüz hiçbir işlevi olmayacak, sadece bir iskelet.
+
+Adım 2 - Temel Fonksiyonellik: "Yeni Hedef Ekle" butonuna basıldığında ekrana yeni bir boş kart eklemesini sağlayan basit JavaScript kodunu yazdıracağız.
+
+Adım 3 - Veriyi Ekrana Yansıtma: Adım 0'da çektiğimiz takipçi sayısı verisini, Adım 1'de oluşturduğumuz statik kartın içine yazdırmasını isteyeceğiz. İşte bu an, projemizin canlandığı ilk andır!
+
+Adım 4 - Basit Aksiyon Önerileri: Bir karta tıklandığında, Aksiyon Paneli'nde henüz yapay zeka olmadan, bizim önceden belirlediğimiz statik önerilerin ("Haftada 3 post at", "Hikayelerde soru-cevap yap" gibi) görünmesini sağlayacağız.
+
+Adım 5 ve Ötesi: Bu temel oturduktan sonra, yapay zeka ile öneri oluşturma ve otomasyonları tetikleme gibi ileri seviye özelliklere geçeceğiz.
+

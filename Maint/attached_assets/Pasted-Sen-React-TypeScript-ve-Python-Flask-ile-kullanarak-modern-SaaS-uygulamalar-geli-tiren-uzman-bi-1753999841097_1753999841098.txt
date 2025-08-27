@@ -1,0 +1,64 @@
+Sen, React, TypeScript ve Python (Flask ile) kullanarak modern SaaS uygulamaları geliştiren uzman bir full-stack geliştiricisin. Görevin, mevcut bir Replit projesine, var olan hiçbir özelliği bozmadan, "Dönüşüm Optimizasyon Merkezi" adında yeni ve kapsamlı bir modül eklemektir.
+
+Bu modül, kullanıcının web sitesini hem teknik hem de yapay zeka destekli bir CRO analisti gibi tarayarak, satışları artıran somut içgörüler ve eylemler sunmalıdır.
+
+Faz 1: Backend "Beyin" İnşası (Python & Flask)
+
+Amaç: Sitenin dönüşüm oranını etkileyen pürüzleri tespit eden ve yorumlayan zeka motorunu oluşturmak.
+
+Yeni API Endpoint'i Oluştur: main.py dosyanda, /analyze-cro adında yeni bir API endpoint'i oluştur. Bu endpoint, analiz edilecek sayfanın URL'ini (örn: ?page_url=https://mervebikini.com/products/siyah-bikini) parametre olarak alacak.
+
+Heuristik Analiz Motoru Geliştir:
+
+Bu endpoint'in içinde, gelen sayfa URL'ini (şimdilik simüle edebilirsin) analiz eden bir Python fonksiyonu yaz.
+
+Bu fonksiyon, temel e-ticaret en iyi pratiklerini kontrol eden bir "kontrol listesi" (checklist) mantığıyla çalışsın. Kontrol edilecekler:
+
+Sayfada "yorum", "değerlendirme" gibi sosyal kanıt kelimeleri var mı?
+
+Ödeme sayfasında "güvenli", "visa", "mastercard" gibi güven ikonları veya kelimeleri var mı?
+
+Ürün sayfasında "paket indirimi", "birlikte al" gibi bundle (paket satış) teklifleri var mı?
+
+Fonksiyon, bu listedeki her bir madde için "Mevcut" veya "Eksik" şeklinde bir sonuç döndürsün.
+
+Davranışsal Analiz Simülasyonu:
+
+Yine aynı endpoint içinde, sanki sitemizde çalışan bir gözlem script'inden geliyormuş gibi, davranışsal verileri simüle eden bir fonksiyon oluştur.
+
+Bu fonksiyon, analiz edilen sayfa için rastgele ama mantıklı ısı haritası verisi (tıklama koordinatları), hata tıklaması verisi ("çalışmayan 'Beden Tablosu' linkine 150 tıklandı") ve kaydırma haritası verisi ("kullanıcıların %70'i sayfanın sonunu görmeden çıktı") üretsin.
+
+Gemini ile Yorumlama Katmanı:
+
+Heuristik ve davranışsal analizden gelen tüm bu bulguları (örn: "Sosyal Kanıt: Eksik", "Hata Tıklaması: Beden Tablosu linki") yapılandırılmış bir metin olarak birleştir.
+
+Bu metni, bir Gemini API çağrısı ile yapay zekaya gönder. Gemini'ye vereceğin komut (prompt) şöyle olmalı:
+
+"Sen bir CRO uzmanısın. Bir e-ticaret ürün sayfasını analiz ettim ve şu bulguları tespit ettim: [Buraya yapılandırılmış bulguları ekle]. Lütfen bu bulguları, bir işletme sahibinin anlayacağı dilde yorumla ve her bir bulgu için dönüşüm oranını artıracak somut bir öneri sun."
+
+API endpoint'i, hem ham bulguları hem de Gemini'den gelen bu "uzman yorumunu" ön yüze (frontend) cevap olarak dönsün.
+
+Faz 2: Frontend "Gövde" İnşası (React & TypeScript)
+
+Amaç: Arka planda üretilen bu zengin analizi, kullanıcının kolayca anlayabileceği ve etkileşime geçebileceği bir arayüze dönüştürmek.
+
+Yeni Sayfa Oluştur: Sol menüye, "Dönüşüm Merkezi" adında yeni bir link ekle. Bu linke tıklandığında açılacak CRO_Center.tsx adında yeni bir komponent oluştur.
+
+Sekmeli Arayüz Tasarla: Bu sayfayı, 4 ana sekmeden oluşan bir yapıda tasarla:
+
+Sekme 1: "Genel Bakış & Kontrol Listesi": Heuristik analiz motorundan gelen "E-ticaret Kontrol Listesi" sonuçlarını göster. Her maddenin yanında bir "Aksiyon Oluştur" butonu olsun.
+
+Sekme 2: "Isı Haritaları": Davranışsal analizden gelen ısı haritası verisini görselleştir.
+
+Sekme 3: "Hata Tıklamaları": Sitedeki çalışmayan veya hatalı çalışan elementlerin listesini göster. Her birinin yanında "Aksiyon Oluştur" butonu bulunsun.
+
+Sekme 4: "Kaydırma Haritaları": Kullanıcıların sayfanın ne kadarını gördüğünü gösteren görsel haritayı sun.
+
+AI Chat ve Aksiyon Entegrasyonu:
+
+Her bir sekmenin içine, o sekmeyle ilgili bulguları tartışabileceğin bir "AI Chat" bileşeni ekle. Kullanıcı buraya, "Bu hatayı nasıl düzeltebilirim?" veya "Sosyal kanıtı nereye eklemeliyim?" gibi sorular sorabilmeli. Bu chat, backend'deki Gemini API'ına bağlanarak cevaplar üretmeli.
+
+Tespit edilen her bir sorun veya fırsatın yanında, kullanıcının bu görevi ekibindeki birine atayabileceği veya kendi yapılacaklar listesine ekleyebileceği bir "Aksiyon Oluştur" butonu ekle.
+
+Lütfen bu mimariyi temel alarak, mevcut projeyi bozmadan, bu yeni "Dönüşüm Optimizasyon Merkezi" modülünü inşa et.
+

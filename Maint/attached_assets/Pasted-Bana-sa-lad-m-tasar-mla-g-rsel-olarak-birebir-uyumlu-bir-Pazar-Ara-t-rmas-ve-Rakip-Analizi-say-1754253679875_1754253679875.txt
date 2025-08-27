@@ -1,0 +1,68 @@
+Bana, sağladığım tasarımla görsel olarak birebir uyumlu bir "Pazar Araştırması ve Rakip Analizi" sayfası oluştur. Sayfayı üç temel dosya kullanarak oluştur: `index.html`, `style.css` ve `script.js`.
+
+Tasarım referansı olarak şu özellikleri dikkate al:
+- **Ana Arka Plan Rengi:** Koyu antrasit (#1A1C23)
+- **Kart/Modül Arka Plan Rengi:** Daha açık bir antrasit (#2A2C37)
+- **Ana Vurgu Rengi:** Canlı bir mavi (#3B7CFE)
+- **Yazı Renkleri:** Başlıklar için beyaz/çok açık gri (#FFFFFF), normal metinler için daha soluk bir gri (#A0A3B1).
+- **Diğer Renkler:** Uyarılar için turuncu/sarı, başarı için yeşil.
+- **Tasarım Dili:** Köşeleri yuvarlatılmış kartlar, temiz ve modern bir yapı.
+
+**1. `index.html` Dosyasının İçeriği:**
+
+* **Google Fonts Entegrasyonu:** `<head>` bölümüne 'Poppins' yazı tipini ekle: `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">`
+* **Sayfa Yapısı:**
+    * Bir ana `div` içinde (`class="content-wrapper"`) çalış.
+    * **Başlık Alanı:**
+        * `<h1>Pazar Radarı</h1>`
+        * `<p>Rakiplerinizi ve pazar trendlerini analiz ederek stratejinizi bir adım öteye taşıyın.</p>`
+    * **Kurulum Bölümü (`<section id="setup-section" class="card">`):**
+        * Bu bölüm, referans görseldeki kartlar gibi tasarlanmalı.
+        * `<h2>AI ile Rakipleri Keşfet</h2>`
+        * `<p class="subtitle">Sektörünüzü veya ürününüzü anlatın, AI potansiyel rakipleri bulsun.</p>`
+        * `<textarea>` ve altında birincil stilde bir `<button id="discover-btn">` (Rakipleri Keşfet).
+        * Araya bir ayırıcı (`<hr>`).
+        * `<h2>Manuel Olarak Rakip Ekle</h2>`
+        * `<input type="text">` ve yanında ikincil stilde bir `<button id="add-btn">` (Ekle).
+        * `<h3>Takip Edilen Rakipler</h3>`
+        * Rakiplerin etiket (tag) olarak gösterileceği bir `<div id="competitor-list"></div>`.
+        * En altta büyük, mavi, birincil stilde bir `<button id="start-analysis-btn">` (Analizi Başlat).
+    * **Radar Paneli Bölümü (`<section id="radar-section">`):**
+        * Bu bölüm başlangıçta gizli olmalı.
+        * Referans görseldeki gibi sekmeli bir yapı kur: "Rakip Akışı", "Sosyal Medya", "SEO & Web", "Fırsat Motoru".
+        * Her sekme içeriği için ayrı `div`'ler oluştur ve içlerini sahte içeriklerle doldur.
+
+**2. `style.css` Dosyasının İçeriği:**
+
+* **CSS Değişkenleri (Variables):** Renk paletini `:root` içinde tanımla:
+    ```css
+    :root {
+      --main-bg: #1A1C23;
+      --card-bg: #2A2C37;
+      --border-color: #3A3D4A;
+      --primary-blue: #3B7CFE;
+      --text-light: #FFFFFF;
+      --text-secondary: #A0A3B1;
+      --warning-orange: #FD7E14;
+    }
+    ```
+* **Genel Stiller:**
+    * `body` için `background-color: var(--main-bg);` ve `font-family: 'Poppins', sans-serif;`.
+    * `h1, h2, h3` başlıkları için `color: var(--text-light);`.
+    * `p, label` gibi metinler için `color: var(--text-secondary);`.
+* **Kart Stili (`.card`):**
+    * `background-color: var(--card-bg);`
+    * `border: 1px solid var(--border-color);`
+    * `border-radius: 8px;`
+    * `padding: 24px;`
+* **Form Elemanları:**
+    * `input` ve `textarea` için `background-color: var(--main-bg);`, `border: 1px solid var(--border-color);`, `color: var(--text-light);`, `border-radius: 6px;`. Odaklanıldığında (focus) `border-color: var(--primary-blue);`.
+* **Butonlar:**
+    * Birincil buton (`#discover-btn`, `#start-analysis-btn`): `background-color: var(--primary-blue);`, `color: white;`, `border: none;`, `border-radius: 6px;`.
+    * İkincil buton (`#add-btn`): `background-color: transparent;`, `color: var(--text-light);`, `border: 1px solid var(--border-color);`.
+* **Rakip Etiketleri (Tags):**
+    * `#competitor-list` içindeki etiketler için: `display: inline-flex;`, `align-items: center;`, `background-color: var(--main-bg);`, `border: 1px solid var(--border-color);`, `padding: 5px 10px;`, `border-radius: 15px;`. Yanındaki 'x' için ayrı stil ver.
+
+**3. `script.js` Dosyasının İçeriği:**
+
+* Bir önceki prompt'taki JavaScript kodunun aynısını kullanabilirsin. Bu kod, butonlara tıklama, listeye sahte veri ekleme/çıkarma, sekmeler arası geçiş yapma ve kurulum ekranını gizleyip radar panelini gösterme gibi arayüz etkileşimlerini yönetecek. Fonksiyonellik, tasarımdan bağımsız olduğu için aynı kalmalı.

@@ -1,0 +1,78 @@
+Adım 2: Yeni "Kanal Performansı" Sayfasını İnşa Et
+
+Bu yeni sayfa, kullanıcının tüm reklam kanallarını tek bir yerden, dinamik bir şekilde analiz etmesini sağlamalıdır. Lütfen aşağıdaki tüm detayları eksiksiz uygula.
+
+Sayfa Üstü Kontrol Paneli: Sayfanın en üstüne, kullanıcının analiz etmek istediği kanalı seçebileceği, tıklandığında aktif olan sekmeler (tabs) ekle. Bu sekmeler şunlar olmalı: "Tüm Kanallar", "Google Ads", "Meta Ads", "TikTok Ads".
+
+Dinamik İçerik Alanı: Bu kontrol panelinin altındaki ana içerik alanı, kullanıcının seçimine göre anında güncellenmelidir. İçeriği doldurmak için aşağıdaki "Veri Simülasyonu" bölümünde verilen sahte verileri kullan.
+
+Kullanıcı **"Tüm Kanallar"**ı seçtiğinde, bu alanda tüm kanalların en önemli metriklerini (Harcama, Ciro, ROAS, CPA) yan yana karşılaştıran, aşağıdaki gibi bir özet tablosu göster:
+
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kanal</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Harcama</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ciro</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ROAS</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPA</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            <!-- Satırlar JavaScript ile Veri Simülasyonu'ndan doldurulacak -->
+        </tbody>
+    </table>
+</div>
+
+Kullanıcı "Meta Ads" gibi spesifik bir kanalı seçtiğinde, sayfa düzenini aşağıdaki gibi yap:
+
+Özet Metrik Kartları: En üste, o kanala özel 4 ana metrik kartı koy (Harcama, Ciro, ROAS, CPA).
+
+En İyi Kampanyalar Tablosu: Altına, o kanaldaki en iyi performans gösteren kampanyaları listeleyen bir tablo ekle.
+
+En İyi Kreatifler Galerisi: En alta, o kanaldaki en başarılı reklam görsellerini gösteren bir resim galerisi ekle.
+
+Adım 3: Veri Simülasyonu
+
+Lütfen tüm bu dinamik içeriği oluşturmak için aşağıdaki sahte (dummy) veri yapısını JavaScript kodunun içinde kullan. Bu, sayfanın boş kalmamasını garanti edecektir.
+
+const KANAL_VERISI = {
+    google: {
+        ozet: { harcama: "₺12,500", ciro: "₺68,750", roas: "5.5x", cpa: "₺110" },
+        kampanyalar: [
+            { ad: "Marka Aramaları - TR", harcama: "₺4,000", ciro: "₺34,000", roas: "8.5x" },
+            { ad: "Alışveriş - Elbiseler", harcama: "₺6,500", ciro: "₺29,250", roas: "4.5x" },
+            { ad: "Görüntülü Reklam Ağı - Yeniden Pazarlama", harcama: "₺2,000", ciro: "₺5,500", roas: "2.75x" }
+        ],
+        kreatifler: [
+            "https://placehold.co/600x400/DB4437/FFFFFF?text=Google+Reklam+1",
+            "https://placehold.co/600x400/4285F4/FFFFFF?text=Google+Reklam+2"
+        ]
+    },
+    meta: {
+        ozet: { harcama: "₺18,200", ciro: "₺76,440", roas: "4.2x", cpa: "₺75" },
+        kampanyalar: [
+            { ad: "Yeniden Pazarlama - Sepet Terk", harcama: "₺5,000", ciro: "₺43,000", roas: "8.6x" },
+            { ad: "Benzer Kitle - Satın Alanlar %1", harcama: "₺10,200", ciro: "₺30,600", roas: "3.0x" },
+            { ad: "Etkileşim Kampanyası - Yeni Koleksiyon", harcama: "₺3,000", ciro: "₺2,840", roas: "0.9x" }
+        ],
+        kreatifler: [
+            "https://placehold.co/600x400/4267B2/FFFFFF?text=Meta+Reklam+1",
+            "https://placehold.co/600x400/1877F2/FFFFFF?text=Meta+Reklam+2"
+        ]
+    },
+    tiktok: {
+        ozet: { harcama: "₺9,800", ciro: "₺37,240", roas: "3.8x", cpa: "₺80" },
+        kampanyalar: [
+            { ad: "Video Tanıtım - Influencer X", harcama: "₺7,000", ciro: "₺31,500", roas: "4.5x" },
+            { ad: "Spark Ads - Popüler Video", harcama: "₺2,800", ciro: "₺5,740", roas: "2.05x" }
+        ],
+        kreatifler: [
+            "https://placehold.co/600x400/000000/FFFFFF?text=TikTok+Reklam+1",
+            "https://placehold.co/600x400/FE2C55/FFFFFF?text=TikTok+Reklam+2"
+        ]
+    }
+};
+
+Bu yeni yapı, kullanıcının farklı kanallar arasında kaybolmasını engelleyecek ve tüm pazarlama performansını tek bir, güçlü ve içi dolu ekrandan yönetmesini sağlayacaktır. Lütfen bu değişiklikleri, mevcut projenin genel tasarım diline ve yapısına uygun şekilde gerçekleştir.

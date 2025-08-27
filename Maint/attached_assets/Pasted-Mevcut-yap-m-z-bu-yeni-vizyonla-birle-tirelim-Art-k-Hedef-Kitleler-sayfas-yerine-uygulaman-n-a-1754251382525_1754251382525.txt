@@ -1,0 +1,80 @@
+Mevcut yapımızı bu yeni vizyonla birleştirelim. Artık "Hedef Kitleler" sayfası yerine, uygulamanın ana bölümlerinden biri "Kitleler & Müşteriler" olmalı. Bu merkezin içinde, yeni ve daha güçlü sekmelerimiz olacak.
+
+[ Gösterge Paneli ]	[ Segmentler ]	[ Personalar ]	[ Keşfet ]
+Sekme 1: Gösterge Paneli (Dashboard)
+
+Burası, tüm müşteri evreninizin bir bakışta özetlendiği yer. Tam olarak "ortalama kullanıcı değerlerini görelim" isteğinizi karşılar.
+
+Ana Metrik Kartları: Toplam Müşteri Sayısı, Ortalama Müşteri Yaşam Boyu Değeri (LTV), Müşteri Edinme Maliyeti (CAC).
+
+Grafikler:
+
+LTV'ye Göre Müşteri Dağılımı (Pasta Grafiği)
+
+Müşterilerin Geldiği Kanallar (Çubuk Grafik)
+
+Zaman İçinde Müşteri Artışı (Çizgi Grafik)
+
+Sekme 2: Segmentler (En Güçlü Yeni Alan)
+
+Burası, sizin "akıllı segmentasyon" dediğiniz şeyi yapacağımız yer. "Dinamik Kitleler" sekmesinin çok daha gelişmiş versiyonu.
+
+Kaydedilmiş Segmentler Listesi:
+
+"Yüksek LTV'li Müşteriler (VIP)"
+
+"Riskli Müşteriler (Son 90 günde alım yapmayan)"
+
+"Sadık Müşteriler (5'ten fazla sipariş veren)"
+
+En üstte belirgin bir [ + Yeni Segment Oluştur ] butonu.
+
+Bu butona basıldığında, projemizin kalbi olan "Akıllı Segment Oluşturucu" açılır:
+
+Akıllı Segment Oluşturucu Arayüzü
+
+Tüm Müşteriler Arasından ŞU Koşulları Sağlayanları Getir:
+
+[ LTV                      ▼ ] [ büyüktür                   ▼ ] [ 5000     ]
+[ VE ]
+[ Son Alışveriş Tarihi     ▼ ] [ 30 günden daha önceydi   ▼ ]
+[ VEYA ]
+[ Geldiği Kanal            ▼ ] [ eşittir                    ▼ ] [ Google Ads ]
+
+[ + Koşul Ekle ]
+
+SONUÇLAR (Anlık Güncellenir):
+
+Bu koşullara uyan 42 Müşteri bulundu.
+
+Bu segmentin Ortalama LTV'si: 7,250 TL
+
+[ Segmenti Kaydet ] [ Bu Segmentten Remarketing Kitlesi Oluştur ]
+Sekme 3 & 4: Personalar ve Keşfet
+
+Bu sekmeler, önceki tasarımımızdaki gibi kalır. "Personalar" soyut, ideal profillerimizi barındırır. "Keşfet" ise ham veriden yeni kitleler bulmamızı sağlar.
+
+Entegrasyon Nasıl Olacak?
+Oluşturduğumuz bir "Segment" (örn: Yüksek LTV'liler) ile bir "Persona"yı ("Girişimci Gökhan") eşleştirebileceğiz. AI, segmentteki gerçek insanların ortak özelliklerini analiz edip personamızın ne kadar isabetli olduğunu bize söyleyecek.
+
+Güncellenmiş İnşa Planı (ÇOK ÖNEMLİ)
+
+Bu vizyon, projenin temel veri gereksinimini değiştiriyor. Artık ilk adımımız bir pazarlama API'sine bağlanmak değil.
+
+Adım 0 (KRİTİK - HER ŞEYİN BAŞLANGICI): Müşteri Veri Kaynağını Belirleme. Müşteri verilerini (LTV, alışveriş tarihleri vb.) nereden alacağız?
+
+Seçenek A (En Kolay MVP): Kullanıcının bir CSV/Excel dosyası yüklemesine izin vermek.
+
+Seçenek B (İleri Seviye): Shopify, WooCommerce gibi bir e-ticaret platformunun API'sine doğrudan bağlanmak.
+
+Bu adımı netleştirmeden diğer adımlara geçemeyiz.
+
+Adım 1 (Statik Arayüz): Yukarıda tasarlanan 4 sekmeli (Gösterge Paneli, Segmentler, Personalar, Keşfet) arayüzün iskeletini HTML/CSS ile kurarız.
+
+Adım 2 (Veri Yükleme ve Listeleme): Adım 0'da kararlaştırılan yöntemle (örn: CSV yükleme) veriyi Replit'e alırız ve basit bir tabloda tüm müşterileri listeleriz. Sadece bağlantının çalıştığını görmek için.
+
+Adım 3 (Gösterge Panelini Canlandırma): Yüklenen veriden yola çıkarak "Toplam Müşteri Sayısı" ve "Ortalama LTV" gibi basit metrikleri hesaplayıp Gösterge Paneli'nde gösteririz.
+
+Adım 4 (Basit Segment Oluşturucu): Segment Oluşturucu'nun sadece tek bir kuralla çalışan versiyonunu yaparız. Örn: [ LTV ] [ büyüktür ] [ Değer ].
+
+Adım 5 ve Ötesi: Çoklu koşul ekleme (VE/VEYA), segmentleri kaydetme ve API'ler üzerinden reklam platformlarında kitle oluşturma gibi gelişmiş özellikleri ekleriz.

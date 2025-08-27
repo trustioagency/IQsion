@@ -1,0 +1,21 @@
+Mevcut 'Ekip' ve 'Görevler' adındaki iki ayrı sayfayı birleştirerek, 'Ekip' adında tek ve daha güçlü bir sayfa oluşturmanı istiyorum. Bu yeni sayfa, hem ekip üyelerini hem de tüm görevleri bir arada yöneten entegre bir merkez görevi görmeli.
+
+**Genel Tasarım ve Yerleşim:**
+Yeni sayfanın tasarımı, uygulamanın mevcut modern ve koyu temasıyla bütünlük içinde olmalı. Profesyonel, temiz ve kullanışlı bir arayüz hedefliyoruz. Sayfayı iki ana dikey sütuna ayırarak bir yerleşim planı oluştur:
+* **Sol Sütun:** Daha dar olan bu sütun, ekip üyelerinin listelendiği bir panel olmalı.
+* **Sağ Sütun:** Daha geniş olan bu ana alan ise görevlerin yönetildiği "Görev Panosu" olmalı.
+
+**Sol Panel: Ekip Paneli'nin İçeriği:**
+1.  Panelin bir başlığı ("Ekip") ve yeni üye eklemek için bir butonu olmalı.
+2.  Bu panelde, her ekip üyesi için birer "üye kartı" gösterilsin.
+3.  Her kartta üyenin profil fotoğrafı (avatarı), adı, rolü ve o anki iş yükünü özetleyen temel metrikler (örneğin "Aktif Görev Sayısı" ve "Gecikmiş Görev Sayısı") bulunsun. Gecikmiş görevler gibi önemli durumlar, dikkat çekecek şekilde görsel olarak belirtilmeli.
+
+**Sağ Panel: Görev Panosu'nun İçeriği:**
+1.  Bu ana alanın da bir başlığı ("Görev Panosu") ve yeni görev eklemek için bir butonu olmalı.
+2.  Görevleri farklı şekillerde görüntülemek için sekmeli bir yapı kurulsun. Bu sekmeler şunları içermeli:
+    * **"Atanmamış Görevler":** Henüz birine atanmamış, havuzda bekleyen tüm görevlerin listelendiği bir bölüm.
+    * **"Kanban Panosu":** "Yapılacak", "Yapılıyor", "İncelemede" ve "Tamamlandı" gibi sütunlardan oluşan, görevlerin mevcut durumunu gösteren ana çalışma alanı.
+    * **"Takvim":** Görevlerin son teslim tarihlerini (deadline) gösteren bir takvim görünümü.
+3.  Kanban panosundaki her bir görev, kendi kartı içinde temsil edilmeli. Bu görev kartları; görevin başlığını, son teslim tarihini, önceliğini belirten bir etiketi (örn: Yüksek, Orta, Düşük) ve eğer atanmışsa görevin sorumlu olduğu kişinin profil fotoğrafını (avatarını) net bir şekilde göstermeli.
+
+Lütfen bu tarife uygun, fonksiyonel bir HTML yapısı ve bunu görsel olarak hayata geçirecek CSS kodunu oluştur. Sayfanın interaktif hissettirmesi için gerekli temel JavaScript iskeletini de hazırla.

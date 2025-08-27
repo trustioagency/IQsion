@@ -1,0 +1,71 @@
+Harika eklemeler! Bu detaylar, uygulamayı jenerik bir araç olmaktan çıkarıp, gerçek bir pazarlama uzmanı gibi düşünen bir platforma dönüştürür. İsteklerinizi anladım ve mevcut "Persona Atölyesi" konseptimizi bu yeni bilgilerle daha da güçlendirecek şekilde güncelledim.
+
+Yeni konseptimizin adı: Akıllı Kitle Merkezi (Intelligent Audience Center)
+
+Bu merkez, üç temel kitle türünü yönetecek şekilde tasarlanacak. Bu, tam olarak sizin belirttiğiniz senaryoları karşılıyor:
+
+Stratejik Personalar: (Veri olmadığında veya pazar bilgisine dayanarak) Manuel olarak, sıfırdan oluşturduğumuz ideal müşteri profilleri. ("Girişimci Gökhan" gibi).
+
+Veri Odaklı Keşifler: (Veri olduğunda) Mevcut site trafiği, CRM veya sosyal medya verilerini analiz ederek yapay zekanın bulduğu, daha önce fark etmediğimiz potansiyel kitleler.
+
+Dinamik Kitleler: (Remarketing ve Sıcak Kitleler) Kullanıcı davranışlarına göre sürekli güncellenen kitleler. Örn: "Son 7 günde siteyi ziyaret edenler", "Sepete ürün ekleyip almayanlar".
+
+Zenginleştirilmiş Sayfa Dizaynı
+
+Bu üçlü yapıyı desteklemek için sayfa arayüzünü sekmeli (tab) bir yapıya oturtalım. Bu, her şeyi düzenli ve anlaşılır tutar.
+
+Kullanıcı "Hedef Kitleler" sayfasına geldiğinde şunu görecek:
+
+[ +](Yeni Kitle Oluştur) butonu
+
+[ Personalarım ]	[ Dinamik Kitleler ]	[ Keşfet ]
+Sekme 1: Personalarım
+
+Bu sekme, bir önceki tasarımımızdaki "Kitle Galerisi" ile aynı kalacak. Manuel olarak oluşturduğumuz, üzerinde tam kontrol sahibi olduğumuz stratejik personalarımız burada listelenecek.
+
+"Girişimci Gökhan"
+
+"Üniversiteli Zeynep"
+
+... vb.
+
+Sekme 2: Dinamik Kitleler (Yeni)
+
+Burası, remarketing ve sıcak kitlelerimizin evi olacak. Bu kitleler, platformlarla (Facebook, Google) sürekli senkronize çalışır. Kartları biraz daha farklı görünür:
+
+Kart: Sıcak Kitle - Website Ziyaretçileri (Son 7 Gün)	Kart: Remarketing - Sepeti Terk Edenler
+Kaynak: 🇬 (Google Analytics ikonu)	Kaynak: 🇫 (Facebook Pixel ikonu)
+Mevcut Büyüklük: ~ 1,250 kişi	Mevcut Büyüklük: ~ 180 kişi
+Durum: Platformlarla Senkronize Edildi ✅	Durum: Senkronizasyon Bekleniyor ⏳
+[ Raporu Gör ] [ Kampanyada Kullan ]	[ Raporu Gör ] [ Kampanyada Kullan ]
+Sekme 3: Keşfet (Yeni)
+
+Burası, yapay zekanın "Akıllı Kitle Keşfi" aracının bulunduğu yer olacak. Kullanıcı buraya gelip veri kaynaklarını (Google Analytics vb.) bağlayacak ve AI'nın analiz yapıp yeni kitle önerileri sunmasını izleyecek.
+
+Zenginleştirilmiş İş Akışı: "[ + ] Yeni Kitle Oluştur" Butonu
+
+Kullanıcı bu butona bastığında, artık doğrudan forma gitmeyecek. Ona bir seçenek sunacağız:
+
+Ne tür bir kitle oluşturmak istersiniz?
+
+➡️ Manuel Olarak Persona Oluştur: (Stratejik Persona) Tıkladığında, bizi detaylı persona oluşturma sihirbazına götürür. ("Veri yoksa" senaryosu)
+
+➡️ Dinamik/Remarketing Kitlesi Oluştur: Tıkladığında, kural bazlı bir sihirbaz açılır. Örn: "ŞU sayfayı ziyaret eden AMA BU sayfayı ziyaret etmeyen kişiler" gibi kurallar tanımlanır. (Remarketing senaryosu)
+
+➡️ Mevcut Verilerden Kitle Keşfet: Tıkladığında, kullanıcıyı doğrudan "Keşfet" sekmesine yönlendirir. ("Veri varsa" senaryosu)
+
+Bu yapı, tüm isteklerinizi karşılayan, son derece organize ve güçlü bir "Kitle Merkezi" oluşturur.
+
+Replit'te İnşa Planımız (Güncellenmiş)
+
+Bu yeni yapıya göre adımlarımız da güncellendi:
+
+Adım 1 (Statik Arayüz): HTML/CSS ile yeni sekmeli yapıyı (Personalarım, Dinamik Kitleler, Keşfet) oluştururuz. "Personalarım" sekmesini sahte kartlarla doldururuz. Diğer sekmeler şimdilik boş olur.
+
+Adım 2 (Manuel Persona Akışı): "Yeni Kitle Oluştur -> Manuel Olarak" akışını tamamen işler hale getiririz. (Form -> Replit DB'ye kaydetme -> Kart olarak ekranda gösterme).
+
+Adım 3 (Dinamik Kitleler Arayüzü): "Dinamik Kitleler" sekmesinin statik arayüzünü, sahte "Sıcak Kitle" ve "Remarketing" kartları ile oluştururuz.
+
+Adım 4 (İlk API Entegrasyonu): Projemizin en önemli adımlarından biri. Örneğin, Facebook Ads API'sine bağlanıp, kullanıcının mevcut "Custom Audience" listesini çekip "Dinamik Kitleler" sekmesinde listelemeyi deneriz. Bu, otomasyonun ilk adımıdır.
+
+Adım 5 ve Ötesi: "Keşfet" aracını ve API üzerinden yeni remarketing kitlesi oluşturma özelliklerini geliştiririz.

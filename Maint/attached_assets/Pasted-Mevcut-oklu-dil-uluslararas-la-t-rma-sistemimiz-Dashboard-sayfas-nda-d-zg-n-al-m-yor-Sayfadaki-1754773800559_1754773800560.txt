@@ -1,0 +1,27 @@
+Mevcut çoklu dil (uluslararasılaştırma) sistemimiz Dashboard sayfasında düzgün çalışmıyor. Sayfadaki metinler, dil değiştirildiğinde güncellenmiyor. Lütfen bu sorunu çözmek için aşağıdaki adımları sırasıyla uygula.
+
+**EN ÖNEMLİ KURAL: `tr.json` dosyası bizim ana kaynağımızdır. Bu dosyayı SADECE OKU. İçeriğini ASLA değiştirme, silme veya üzerine yazma. Tüm değişiklikler sadece `en.json` dosyasında veya diğer dosyalarda yapılacak.**
+
+**Hedef:** `client/src/pages/dashboard.tsx` dosyasındaki tüm statik metinleri, `LanguageContext` kullanarak Türkçe ve İngilizce arasında dinamik olarak değiştirilebilir hale getirmek.
+
+**Adım 1: Dil Sisteminin Beynini Kontrol Et (`LanguageContext.tsx`)**
+* `client/src/contexts/LanguageContext.tsx` dosyasını aç ve kontrol et.
+* Bu dosyanın, seçilen dile göre (`tr` veya `en`) doğru çeviri dosyasını (`locales/tr.json` veya `locales/en.json`) yüklediğinden emin ol.
+* `useLanguage` adında bir hook'un, `t(key)` gibi bir çeviri fonksiyonunu sağladığından ve doğru şekilde export edildiğinden emin ol.
+* Gerekli herhangi bir hata düzeltmesini bu dosyada yap.
+
+**Adım 2: Dashboard Sayfasını Dil Sistemine Bağla (`dashboard.tsx`)**
+* `client/src/pages/dashboard.tsx` dosyasını aç.
+* Dosyanın en üstüne, `useLanguage` hook'unu import et.
+* Fonksiyonel bileşenin en başında `const { t } = useLanguage();` satırını ekleyerek çeviri fonksiyonunu çağır.
+* Sayfanın içindeki TÜM statik Türkçe metinleri (başlıklar, kartlardaki yazılar, butonlar vb.) `t()` fonksiyonu ile değiştir.
+    * Örnek: `<h2>Hazine Dağılması</h2>` satırını `<h2>{t('treasure_distribution')}</h2>` olarak değiştir.
+    * Örnek: `<span>Toplam Aktif Ürün</span>` satırını `<span>{t('total_active_products')}</span>` olarak değiştir.
+* Bu işlemi sayfadaki tüm metinler için uygula.
+
+**Adım 3: İngilizce Çeviri Dosyasını Tamamla (`en.json`)**
+* **`tr.json` dosyasına dokunma!**
+* `dashboard.tsx` dosyasında kullandığın tüm yeni anahtarların (`treasure_distribution`, `total_active_products` vb.) `locales/en.json` dosyasında bulunduğundan emin ol.
+* Eğer `en.json` dosyasında bir anahtar eksikse, onu `tr.json` dosyasından referans alarak ekle ve karşılığına uygun İngilizce çevirisini yaz. `en.json` dosyasında eksik çeviri bırakma.
+
+Lütfen bu üç adımı tamamladıktan sonra, Dashboard sayfasının dil değiştirici ile tamamen çevrildiğini doğrula.

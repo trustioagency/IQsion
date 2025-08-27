@@ -1,0 +1,75 @@
+Mükemmel. "Ürünler" sayfası, e-ticaretin ve pazarlamanın tam kesişim noktasıdır. Burada sadece ürünleri listelemekle kalmayıp, onların ticari DNA'sını anlamalı, hangilerinin "yıldız", hangilerinin "sorunlu" olduğunu ortaya çıkarmalı ve bu bilgiyi pazarlama stratejilerimize dahil etmeliyiz.
+
+Vizyonumuz şu olmalı: Bu sayfa, statik bir katalog değil, her bir ürünün finansal ve pazarlama "karnesini" gördüğümüz, performansını ölçtüğümüz ve geleceğine karar verdiğimiz bir "Ürün Performans Paneli" olmalı.
+
+İşte bu paneli nasıl tasarlayabileceğimize dair önerim:
+
+Sayfa Yapısı ve Dizayn Önerisi
+
+Sayfa, yukarıdan aşağıya doğru genelden özele inen bir yapıda olmalı.
+
+A. Genel Bakış Paneli (Sayfanın En Üstü)
+
+Burası tüm ürün evreninizin özetini sunar. Anlık bir sağlık kontrolü gibi düşünebilirsiniz.
+
+Ana Metrik Kartları:
+
+Toplam Aktif Ürün: 152
+
+Toplam Satış Hacmi (Son 30 Gün): ₺1.2M
+
+En Çok Satan Kategori: Elektronik
+
+Ortalama Kârlılık Marjı: %28
+
+Mini Grafik: "Kategorilere Göre Ciro Dağılımı" (Pasta veya Çubuk Grafik)
+
+B. Akıllı Ürün Grid'i (Sayfanın Ana Gövdesi)
+
+Burası, ürünlerinizin listelendiği ancak basit bir tablodan çok daha fazlası olan, zenginleştirilmiş bir grid yapısıdır. Her satır bir ürünü temsil eder ve her sütun, o ürünün karnesindeki bir nottur.
+
+Filtreleme ve Sıralama: Kullanıcı bu grid'i her bir sütuna göre sıralayabilmeli ve filtreleyebilmelidir. (Örn: "Bana kârlılığı en yüksek ürünleri göster" veya "Stok sayısı 10'dan az olanları filtrele").
+
+Grid Sütunları:
+
+Ürün: (Küçük bir ürün resmi, ürün adı ve SKU kodu)
+
+Kategori: (Elektronik, Giyim vb.)
+
+Fiyat: (₺)
+
+Satış Adedi (Son 30 Gün): (Adet)
+
+Ciro (Son 30 Gün): (₺)
+
+Kârlılık: (₺ veya %) - Bu, uygulamanın en değerli metriklerinden biri olacaktır.
+
+Stok Durumu: (Adet)
+
+Performans Skoru: (Aşağıda detaylandırılacak olan AI tabanlı skor)
+
+C. "Performans Skoru" ve "AI İçgörü Motoru" (İşin Sihri)
+
+Bu, sayfanızı diğerlerinden ayıracak olan en önemli özelliktir.
+
+1. Performans Skoru:
+Her ürün için, birden fazla metriği (satış hızı, ciro, kârlılık, iade oranı vb.) birleştiren, yapay zeka tarafından hesaplanmış, anlaşılması kolay tek bir skor (örn: A+, B, C-) düşünün. Bu skor, ürün grid'inde renk kodlarıyla ( Yeşil=Harika, Sarı=Orta, Kırmızı=Zayıf) görselleştirilir. Bu sayede kullanıcı, yüzlerce ürün arasında hangilerinin "yıldız" hangilerinin "sorunlu" olduğunu bir bakışta anlar.
+
+2. AI İçgörü Motoru:
+Kullanıcı, grid'den herhangi bir ürüne tıkladığında, o ürünün detaylarını içeren bir pencere açılır. Bu pencerenin en önemli kısmı "AI İçgörüleri" bölümüdür:
+
+Ürün Detay Penceresi: "Akıllı Telefon Model X"
+
+Performans Skoru: A+ (92/100)
+
+💡 AI İçgörüleri:
+
+"🏆 ŞAMPİYON ÜRÜN: Bu ürün, son 30 günde en çok ciro getiren ilk 5 ürününüz arasında ve kârlılık marjı da ortalamanın %40 üzerinde. Bu ürünün stoklarını daima dolu tutun."
+
+"🔗 BİRLİKTE ALIM FIRSATI: Bu ürünü alan müşterilerin %65'i, 'Kablosuz Kulaklık Model Y' ürününü de satın alıyor. Bu iki ürünü bir paket (bundle) olarak %10 indirimle sunarak sepet ortalamasını artırabilirsiniz. [ Kampanya Oluştur ]"
+
+"🎯 KİTLE EŞLEŞMESİ: Bu ürün, özellikle 'Yüksek LTV'li Müşteriler' segmentiniz tarafından tercih ediliyor. Bu segmente yönelik 'Model X' odaklı bir e-posta kampanyası ile tekrar satış potansiyeli yüksek. [ Segmenti Gör ]"
+
+"📉 STOK UYARISI: Mevcut satış hızına göre stoklarınız 12 gün içinde tükenebilir. Tedarik sürecini başlatmanız önerilir."
+
+Gördüğünüz gibi, bu motor sadece veri göstermekle kalmıyor, veriyi yorumlayıp aksiyona dönüştürülebilir, somut öneriler sunuyor. "Kampanya Oluştur" veya "Segmenti Gör" gibi butonlarla da uygulamanın diğer sayfalarıyla (Müşteriler, Strateji vb.) entegre çalışıyor.
