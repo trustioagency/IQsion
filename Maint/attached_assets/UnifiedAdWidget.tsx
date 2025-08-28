@@ -56,8 +56,9 @@ const UnifiedAdWidget: React.FC<UnifiedAdWidgetProps> = ({ language, dateRange, 
       fetchUrl = `/api/meta/ads/raw?userId=test-user&adAccountId=${accountId}&fields=spend,impressions,reach,clicks,campaign_name&since=${since}&until=${until}`;
     } else if (platform === 'google' && propertyId) {
       fetchUrl = `/api/analytics/summary?userId=test-user&propertyId=${propertyId}&startDate=${since}&endDate=${until}`;
+    } else if (platform === 'googleads' && accountId) {
+      fetchUrl = `/api/googleads/metrics?userId=test-user&accountId=${accountId}`;
     } else if (platform === 'all' && accountId && propertyId) {
-      // Önce Meta, sonra Google verisi çekilecek ve birleştirilecek
       Promise.all([
         fetch(`/api/meta/ads/raw?userId=test-user&adAccountId=${accountId}&fields=spend,impressions,reach,clicks,campaign_name&since=${since}&until=${until}`).then(res => res.json()),
         fetch(`/api/analytics/summary?userId=test-user&propertyId=${propertyId}&startDate=${since}&endDate=${until}`).then(res => res.json())

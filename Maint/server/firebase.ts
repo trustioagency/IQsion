@@ -1,11 +1,10 @@
-import admin from "firebase-admin";
-import { getApps, initializeApp, applicationDefault } from "firebase-admin/app";
 
-if (!getApps().length) {
-  initializeApp({
-    credential: applicationDefault(),
-    databaseURL: process.env.FIREBASE_DATABASE_URL,
-  });
-}
+import admin from 'firebase-admin';
+import serviceAccount from './maint-ca347-firebase-adminsdk-fbsvc-e8c566eb2c.json';
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount as any),
+  databaseURL: 'https://maint-ca347-default-rtdb.firebaseio.com'
+});
 
 export default admin;

@@ -1,14 +1,118 @@
 
-
-
-
-
-
 import express from "express";
 import admin from "./firebase";
+import axios from "axios";
 const router = express.Router();
 
-import axios from "axios";
+// Kullanıcı bilgisi döndüren endpoint
+router.get('/api/auth/user', async (req, res) => {
+  // userUid frontend'den header veya query ile gelmeli
+  let userUid = req.headers['x-user-uid'] || req.query.uid;
+  if (Array.isArray(userUid)) userUid = userUid[0];
+  if (!userUid || typeof userUid !== 'string') {
+    return res.status(401).json({ message: 'Kullanıcı oturumu yok.' });
+  }
+  try {
+    // Demo/test UID için örnek kullanıcı döndür
+    if (userUid === 'demo-uid-123') {
+      return res.json({
+        uid: 'demo-uid-123',
+        email: 'demo@demo.com',
+        firstName: 'Demo',
+        lastName: 'Kullanıcı',
+        companyName: 'Demo Şirketi',
+        profileImageUrl: '',
+      });
+    }
+    const userRecord = await admin.auth().getUser(userUid);
+    const userDataSnap = await admin.database().ref(`users/${userUid}`).once('value');
+    const userData = userDataSnap.val();
+    return res.json({
+      uid: userRecord.uid,
+      email: userRecord.email,
+      firstName: userData?.firstName || '',
+      lastName: userData?.lastName || '',
+      companyName: userData?.companyName || '',
+      profileImageUrl: userData?.profileImageUrl || '',
+    });
+  } catch (error) {
+    return res.status(401).json({ message: 'Kullanıcı bulunamadı.' });
+  }
+});
+
+// Test endpoint: Router ve Express çalışıyor mu?
+router.get('/api/test', (req, res) => {
+  res.json({ message: 'API çalışıyor' });
+});
+
+// (tekrar) kaldırıldı
+// (tekrar) kaldırıldı
+// const router = express.Router();
+// (tekrar) kaldırıldı
+
+// Manuel hesap oluşturma (signup) endpointi
+router.post('/api/auth/signup', async (req, res) => {
+  console.log('[SIGNUP ENDPOINT] İstek geldi:', req.method, req.url);
+  const { email, password, firstName, lastName, companyName } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ message: 'E-posta ve şifre zorunlu.' });
+  }
+  try {
+    // Firebase ile kullanıcı oluştur
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName: `${firstName || ''} ${lastName || ''}`.trim(),
+    });
+    // Ek profil bilgilerini ve şifreyi test ortamı için veritabanına kaydet
+    await admin.database().ref(`users/${userRecord.uid}`).set({
+      email,
+      password,
+      firstName,
+      lastName,
+      companyName,
+      createdAt: Date.now(),
+    });
+    return res.json({ message: 'Kayıt başarılı', uid: userRecord.uid });
+  } catch (error) {
+    console.error('[SIGNUP ERROR]', error);
+    return res.status(500).json({ message: 'Kayıt başarısız', error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// Manuel login endpointi
+router.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ message: 'E-posta ve şifre zorunlu.' });
+  }
+  try {
+    // Firebase ile kullanıcıyı bul
+    const user = await admin.auth().getUserByEmail(email);
+    // Şifre kontrolü için Firebase Auth REST API kullanılmalı
+    // Test ortamı için basit kontrol: şifreyi veritabanında saklıyorsanız karşılaştırabilirsiniz
+    const userDataSnap = await admin.database().ref(`users/${user.uid}`).once('value');
+    const userData = userDataSnap.val();
+    if (!userData || userData.password !== password) {
+      return res.status(401).json({ message: 'E-posta veya şifre hatalı.' });
+    }
+    return res.json({ message: 'Giriş başarılı', uid: user.uid });
+  } catch (error) {
+    console.error('[LOGIN ERROR]', error);
+    return res.status(401).json({ message: 'Giriş başarısız', error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+
+
+
+
+
+// (tekrar) kaldırıldı
+// (tekrar) kaldırıldı
+// const router = express.Router();
+
+// (tekrar) kaldırıldı
 // Shopify OAuth başlatma endpointi
 router.get('/api/auth/shopify/connect', (req, res) => {
   const storeUrl = req.query.storeUrl as string;

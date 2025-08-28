@@ -29,10 +29,11 @@ export default function Auth() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
     try {
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
+      // Save example user UID to localStorage
+      localStorage.setItem('userUid', 'demo-uid-123');
       // Redirect to onboarding after successful login
       window.location.href = '/onboarding';
     } catch (error) {

@@ -1,6 +1,7 @@
 
 
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../client/src/hooks/useAuth';
 import { Page } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -45,16 +46,23 @@ const App: React.FC = () => {
   const [isOnboardingComplete, setIsOnboardingComplete] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  
   const [language, setLanguage] = useState<'tr' | 'en'>(() => {
     const storedLang = localStorage.getItem('language');
     return (storedLang === 'tr' || storedLang === 'en') ? storedLang : 'tr';
   });
+  const { isAuthenticated, isLoading, user } = useAuth();
+  console.log('[App] Render, useAuth:', { isAuthenticated, isLoading, user });
 
   useEffect(() => {
-      localStorage.setItem('language', language);
-      document.documentElement.lang = language;
+    localStorage.setItem('language', language);
+    document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      window.location.href = '/auth';
+    }
+  }, [isAuthenticated, isLoading]);
 
 
   const handleOnboardingComplete = () => {
@@ -63,6 +71,9 @@ const App: React.FC = () => {
 
   if (!isOnboardingComplete) {
     return <Onboarding onComplete={handleOnboardingComplete} language={language} />;
+  }
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-screen">Yükleniyor...</div>;
   }
 
   const renderPage = () => {
