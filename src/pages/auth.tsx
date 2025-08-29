@@ -1,10 +1,23 @@
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { signInWithGoogle } from "../lib/firebase";
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithGoogle();
+      const user = result.user;
+      if (user && user.uid) {
+        localStorage.setItem('userUid', user.uid);
+        window.location.href = '/dashboard';
+      }
+    } catch (error) {
+      setErrorMsg('Google ile giriş başarısız. Lütfen tekrar deneyin.');
+    }
+  };
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function Auth() {
@@ -26,17 +39,33 @@ export default function Auth() {
     });
   };
 
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+    setErrorMsg(null);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // Redirect to onboarding after successful login
-      window.location.href = '/onboarding';
+  const res = await fetch('http://localhost:5000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.message || 'Giriş başarısız. Lütfen bilgilerinizi kontrol edin.');
+        return;
+      }
+      // Başarılı login sonrası dashboard'a yönlendir
+      if (data.uid) {
+        localStorage.setItem('userUid', data.uid);
+      }
+      window.location.href = '/dashboard';
     } catch (error) {
-      console.error('Login error:', error);
+      setErrorMsg('Sunucu hatası. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
     }
@@ -45,20 +74,36 @@ export default function Auth() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-
+    setErrorMsg(null);
     if (formData.password !== formData.confirmPassword) {
-      alert('Şifreler eşleşmiyor');
+      setErrorMsg('Şifreler eşleşmiyor');
       setIsLoading(false);
       return;
     }
-
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // Redirect to onboarding after successful signup
-      window.location.href = '/onboarding';
+  const res = await fetch('http://localhost:5000/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          companyName: formData.companyName
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.message || 'Kayıt başarısız. Lütfen bilgilerinizi kontrol edin.');
+        return;
+      }
+      // Başarılı signup sonrası onboarding'e yönlendir
+      if (data.uid) {
+        localStorage.setItem('userUid', data.uid);
+      }
+      window.location.href = '/dashboard';
     } catch (error) {
-      console.error('Signup error:', error);
+      setErrorMsg('Sunucu hatası. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
     }
@@ -126,6 +171,9 @@ export default function Auth() {
                     </div>
                   </div>
 
+                  {errorMsg && (
+                    <div className="text-red-600 text-sm mb-2 text-center">{errorMsg}</div>
+                  )}
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? (
                       <>
@@ -135,6 +183,9 @@ export default function Auth() {
                     ) : (
                       'Giriş Yap'
                     )}
+                  </Button>
+                  <Button type="button" className="w-full mt-2 bg-red-500 hover:bg-red-600 text-white" onClick={handleGoogleLogin}>
+                    Google ile Giriş Yap
                   </Button>
                 </form>
               </TabsContent>
@@ -217,6 +268,9 @@ export default function Auth() {
                     />
                   </div>
 
+                  {errorMsg && (
+                    <div className="text-red-600 text-sm mb-2 text-center">{errorMsg}</div>
+                  )}
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? (
                       <>

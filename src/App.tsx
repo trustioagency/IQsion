@@ -1,32 +1,33 @@
+import React from "react";
+console.log('[App] Component loaded!');
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "./components/ui/toaster";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { LanguageProvider } from "./contexts/LanguageContext";
-import { useAuth } from "@/hooks/useAuth";
-import Landing from "@/pages/landing";
-import Dashboard from "@/pages/dashboard";
-import MarketAnalysis from "@/pages/market-analysis";
-import CompetitorAnalysis from "@/pages/competitor-analysis";
-import Settings from "@/pages/settings";
-import NotFound from "@/pages/not-found";
-import Attribution from "@/pages/attribution";
-import Profitability from "@/pages/profitability";
+import { useAuth } from "./hooks/useAuth";
+import Landing from "./pages/landing";
+import Dashboard from "./pages/dashboard";
+import MarketAnalysis from "./pages/market-analysis";
+import CompetitorAnalysis from "./pages/competitor-analysis";
+import Settings from "./pages/settings";
+import NotFound from "./pages/not-found";
+import Attribution from "./pages/attribution";
+import Profitability from "./pages/profitability";
 import Customers from './pages/customers';
 import Products from './pages/products';
-import Strategy from "@/pages/strategy";
-import Creative from "@/pages/creative";
-import Reports from "@/pages/reports";
-import Opportunities from "@/pages/opportunities";
-import Scenarios from "@/pages/scenarios";
-import KpiAnalysis from "@/pages/kpi-analysis";
-import TouchpointAnalysis from "@/pages/touchpoint-analysis";
-import Sidebar from "@/components/layout/sidebar";
-import Header from "@/components/layout/header";
-
-import Auth from "@/pages/auth";
-import Onboarding from "@/pages/onboarding";
+import Strategy from "./pages/strategy";
+import Creative from "./pages/creative";
+import Reports from "./pages/reports";
+import Opportunities from "./pages/opportunities";
+import Scenarios from "./pages/scenarios";
+import KpiAnalysis from "./pages/kpi-analysis";
+import TouchpointAnalysis from "./pages/touchpoint-analysis";
+import Sidebar from "./components/layout/sidebar";
+import Header from "./components/layout/header";
+import Auth from "./pages/auth";
+import Onboarding from "./pages/onboarding";
 import Affiliate from './pages/affiliate';
 import Collaborations from './pages/collaborations';
 import Team from './pages/team';
@@ -35,7 +36,8 @@ import AIAssistantPage from './pages/ai-assistant';
 import Autopilot from './pages/autopilot';
 
 function Router() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+  console.log('[App] Render, useAuth:', { isAuthenticated, isLoading, user });
 
   if (isLoading) {
     return (
@@ -63,6 +65,7 @@ function Router() {
         <main className="flex-1 overflow-y-auto bg-slate-800/50 p-6">
           <Switch>
             <Route path="/" component={Dashboard} />
+            <Route path="/dashboard" component={Dashboard} />
             <Route path="/market-analysis" component={MarketAnalysis} />
             <Route path="/competitor-analysis" component={CompetitorAnalysis} />
             <Route path="/attribution" component={Attribution} />

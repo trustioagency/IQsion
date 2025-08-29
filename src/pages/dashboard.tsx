@@ -1,44 +1,22 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { 
-  TrendingUp,
-  TrendingDown,
-  Users,
-  ShoppingCart,
-  DollarSign,
-  Eye,
-  Calendar,
-  Filter,
-  Target,
-  Send,
-  Bot,
-  Lightbulb,
-  AlertTriangle,
-  BarChart3,
-  PieChart,
-  AlertCircle,
-  Layers,
-  ArrowUpRight,
-  ArrowDownRight,
-  Zap,
-  Activity,
-  Play,
-  CheckCircle,
-  Search
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Badge } from "../components/ui/badge";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { Switch } from "../components/ui/switch";
+import { Label } from "../components/ui/label";
+import { useAuth } from "../hooks/useAuth";
+import { useToast } from "../hooks/use-toast";
+import AIChatPanel from "../components/ai-chat-panel";
+import Header from "../components/layout/header";
+import { useLanguage } from "../contexts/LanguageContext";
+import {
+  DollarSign, Target, ShoppingCart, TrendingUp, BarChart3, Users, Layers, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity,
+  Play, AlertTriangle, Eye, CheckCircle
 } from "lucide-react";
-import AIChatPanel from "@/components/ai-chat-panel";
-import Header from "@/components/layout/header";
-import { useLanguage } from "@/contexts/LanguageContext";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
 
 type DateRangeKey = '7d' | '30d' | '90d' | 'custom';

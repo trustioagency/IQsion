@@ -1,3 +1,5 @@
+export type Language = 'tr' | 'en';
+export type TranslationKey = keyof typeof translations['tr'];
 
 export const translations = {
   tr: {
@@ -305,7 +307,7 @@ export const translations = {
     organicTraffic: "Organic Traffic",
     
     // Metrics and KPIs
-    impressions: "Impressions",
+  // impressions: "Impressions", // duplicate removed
     clicks: "Clicks",
     ctr: "CTR",
     cpc: "CPC",
@@ -467,7 +469,7 @@ export const translations = {
     assignedPerson: "Assigned Person",
     unassigned: "Unassigned",
     start: "Start",
-    assignTask: "Assign Task",
+  // assignTask: "Assign Task", // duplicate removed
     
     // Strategy page
     strategyPlanner: "Strategy Planner",
@@ -513,11 +515,11 @@ export const translations = {
     bestRoas: "Best ROAS",
     creativePerformance: "Creative Performance",
     springCollectionVideo: "Spring Collection Video",
-    discountCampaignBanner: "Discount Campaign Banner",
-    productShowcaseCarousel: "Product Showcase Carousel",
-    impressions: "Impressions",
-    spend: "Spend",
-    paused: "Paused",
+  discountCampaignBanner: "Discount Campaign Banner",
+  productShowcaseCarousel: "Product Showcase Carousel",
+  // impressions: "Impressions", // duplicate removed
+  spend: "Spend",
+  paused: "Paused",
     
     // Reports page
     createAndDownloadReports: "Create and download your performance reports",
@@ -552,23 +554,23 @@ export const translations = {
     // Team and Task Management
     teamManagement: "Team Management",
     taskManagement: "Task Management",
-    teamMembers: "Team Members",
-    addTeamMember: "Add Team Member",
-    assignTask: "Assign Task",
-    taskStatus: "Task Status",
-    priority: "Priority",
+  teamMembers: "Team Members",
+  addTeamMember: "Add Team Member",
+  // assignTask: "Assign Task", // duplicate removed
+  taskStatus: "Task Status",
+  priority: "Priority",
     dueDate: "Due Date",
     assignee: "Assignee",
     taskDescription: "Task Description",
     createTask: "Create Task",
     editTask: "Edit Task",
-    deleteTask: "Delete Task",
-    completeTask: "Complete Task",
-    inProgress: "In Progress",
-    pending: "Pending",
-    completed: "Completed",
-    high: "High",
-    medium: "Medium",
+  deleteTask: "Delete Task",
+  completeTask: "Complete Task",
+  // inProgress: "In Progress", // duplicate removed
+  // pending: "Pending", // duplicate removed
+  // completed: "Completed", // duplicate removed
+  high: "High",
+  medium: "Medium",
     low: "Low",
     
     // Customer Management
@@ -636,11 +638,11 @@ export const translations = {
     sharedWorkspace: "Shared Workspace",
     
     // Analytics and Reporting
-    advancedAnalytics: "Advanced Analytics",
-    customReports: "Custom Reports",
-    dataVisualization: "Data Visualization",
-    kpiTracking: "KPI Tracking",
-    performanceDashboard: "Performance Dashboard",
+  advancedAnalytics: "Advanced Analytics",
+  customReports: "Custom Reports",
+  // dataVisualization: "Data Visualization", // duplicate removed
+  kpiTracking: "KPI Tracking",
+  performanceDashboard: "Performance Dashboard",
     realTimeData: "Real-time Data",
     historicalData: "Historical Data",
     predictiveAnalytics: "Predictive Analytics",

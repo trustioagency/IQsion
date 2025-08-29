@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Node.js
 node_modules/
 
@@ -24,3 +25,9 @@ Thumbs.db
 # Misc
 *.swp
 *.swo
+=======
+node_modules
+dist/
+build/
+public/
+>>>>>>> 226a94c (Temizlik: gereksiz klasörler ignore edildi, kaynak kod güncellendi)

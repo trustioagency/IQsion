@@ -48,6 +48,11 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { id: 'settings', label: 'Ayarlar', href: '/settings', icon: 'Settings', category: 'settings' },
 ];
 
+export const navigation = {
+  items: NAVIGATION_ITEMS,
+  getNavigationUrl,
+};
+
 // Navigation utility to preserve test mode across routes
 export function getNavigationUrl(path: string): string {
   const isTestMode = window.location.search.includes('test=true');

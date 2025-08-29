@@ -1,12 +1,12 @@
-
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { useLocation } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Progress } from "../components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
+import { Label } from "../components/ui/label";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import { CheckCircle, ArrowRight, ArrowLeft } from "lucide-react";
 
 interface OnboardingData {
@@ -53,6 +53,7 @@ const steps = [
 
 export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(1);
+  const [, setLocation] = useLocation();
   const [formData, setFormData] = useState<OnboardingData>({
     industry: '',
     businessModel: '',
@@ -83,8 +84,10 @@ export default function Onboarding() {
   };
 
   const handleNext = () => {
-    if (currentStep < 6) {
+    if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
+    } else if (currentStep === 5) {
+      setCurrentStep(6); // Tamamla adımında otomatik dashboard'a yönlendirme
     }
   };
 
@@ -648,6 +651,12 @@ export default function Onboarding() {
         return null;
     }
   };
+
+  // Tamamlandı adımında dashboard'a yönlendir
+  if (currentStep === 6) {
+    setLocation('/dashboard');
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">

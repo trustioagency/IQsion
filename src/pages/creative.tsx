@@ -1,9 +1,9 @@
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Badge } from "../components/ui/badge";
 import { Palette, TrendingUp, Eye, MousePointer, Heart, Share, Download, Plus } from "lucide-react";
 
 export default function Creative() {
@@ -62,16 +62,16 @@ export default function Creative() {
     { metric: 'En İyi ROAS', value: '4.8x', creative: 'Bahar Koleksiyonu Video', change: '+0.3x' }
   ];
 
-  const getPlatformColor = (platform) => {
+  const getPlatformColor = (platform: string): string => {
     const colors = {
       meta: 'bg-blue-500/20 text-blue-400',
       google: 'bg-red-500/20 text-red-400',
       tiktok: 'bg-black/20 text-white'
     };
-    return colors[platform] || 'bg-gray-500/20 text-gray-400';
+  return colors[platform as keyof typeof colors] || 'bg-gray-500/20 text-gray-400';
   };
 
-  const getTypeIcon = (type) => {
+  const getTypeIcon = (type: string) => {
     switch(type) {
       case 'video': return '🎥';
       case 'image': return '🖼️';
