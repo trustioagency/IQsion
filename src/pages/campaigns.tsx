@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Input } from "../components/ui/input";
+import { Switch } from "../components/ui/switch";
+import { Label } from "../components/ui/label";
 
 import { 
   Megaphone, 
@@ -321,7 +321,7 @@ export default function CampaignsPage() {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 flex-1 min-w-0">
-            <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${PLATFORM_COLORS[campaign.platform]} flex items-center justify-center text-white text-lg flex-shrink-0`}>
+            <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${PLATFORM_COLORS[campaign.platform as keyof typeof PLATFORM_COLORS]} flex items-center justify-center text-white text-lg flex-shrink-0`}>
               {getPlatformIcon(campaign.platform)}
             </div>
             <div className="flex-1 min-w-0">

@@ -1,42 +1,33 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "../ui/button";
+import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
 import { 
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+} from "../ui/dropdown-menu";
+import { Badge } from "../ui/badge";
 import { Bell, Search, User, Settings, LogOut, Globe, Menu } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "../../hooks/useAuth";
 import { type User as UserType } from "@shared/schema";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsMobile } from "../../hooks/use-mobile";
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Input } from '@/components/ui/input';
+import { Input } from '../ui/input';
 
 interface HeaderProps {
   currentPage: string;
 }
 
 export default function Header({ currentPage }: HeaderProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { t } = useLanguage();
   const isMobile = useIsMobile();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const handleLogout = () => {
-    // Check if we're in test mode
-    const isTestMode = window.location.search.includes('test=true');
-    if (isTestMode) {
-      // In test mode, just go back to landing page
-      window.location.href = '/';
-    } else {
-      window.location.href = '/api/logout';
-    }
-  };
+  const handleLogout = logout;
 
 
 

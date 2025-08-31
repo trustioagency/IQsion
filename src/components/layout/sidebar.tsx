@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
+import { Button } from "../ui/button";
 import {
   BarChart3,
   TrendingUp,
@@ -35,11 +35,11 @@ import {
   Users2,
   Play
 } from "lucide-react";
-import { NAVIGATION_ITEMS } from "@/lib/constants";
-import { useIsMobile } from "@/hooks/use-mobile";
-import { getNavigationUrl } from "@/lib/navigation";
-import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { NAVIGATION_ITEMS } from "../../lib/constants";
+import { useIsMobile } from "../../hooks/use-mobile";
+import { navigation } from "../../lib/navigation";
+import { cn } from "../../lib/utils";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 const iconMap = {
   BarChart3,
@@ -154,11 +154,11 @@ export default function Sidebar() {
               )}
               <div className="space-y-1">
                 {items.map((item) => {
-                  const isActive = location === getNavigationUrl(item.href);
+                  const isActive = location === navigation.getNavigationUrl(item.href);
                   return (
                     <a
                       key={item.id}
-                      href={getNavigationUrl(item.href)}
+                      href={navigation.getNavigationUrl(item.href)}
                       className={cn(
                         "sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium cursor-pointer rounded-lg transition-colors",
                         isActive
@@ -167,7 +167,7 @@ export default function Sidebar() {
                       )}
                       onClick={(e) => {
                         e.preventDefault();
-                        setLocation(getNavigationUrl(item.href));
+                        setLocation(navigation.getNavigationUrl(item.href));
                         closeMobileSidebar();
                       }}
                     >
