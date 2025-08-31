@@ -27,13 +27,17 @@ router.get('/api/auth/user', async (req, res) => {
     const userRecord = await admin.auth().getUser(userUid);
     const userDataSnap = await admin.database().ref(`users/${userUid}`).once('value');
     const userData = userDataSnap.val();
+    // Google ile girişte isim ve görsel userRecord'dan alınır
+    const firstName = userRecord.displayName?.split(' ')[0] || userData?.firstName || '';
+    const lastName = userRecord.displayName?.split(' ').slice(1).join(' ') || userData?.lastName || '';
+    const profileImageUrl = userRecord.photoURL || userData?.profileImageUrl || '';
     return res.json({
       uid: userRecord.uid,
       email: userRecord.email,
-      firstName: userData?.firstName || '',
-      lastName: userData?.lastName || '',
+      firstName,
+      lastName,
       companyName: userData?.companyName || '',
-      profileImageUrl: userData?.profileImageUrl || '',
+      profileImageUrl,
     });
   } catch (error) {
     return res.status(401).json({ message: 'Kullanıcı bulunamadı.' });
