@@ -1,3 +1,8 @@
+// @ts-ignore: package does not ship types
+import tailwindcssAnimate from "tailwindcss-animate";
+// @ts-ignore: package does not ship types
+import typography from "@tailwindcss/typography";
+
 export default {
   darkMode: "class",
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
@@ -89,5 +94,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  plugins: [tailwindcssAnimate, typography],
 };

@@ -1,7 +1,5 @@
-/* Minimal custom properties for Tailwind theme */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Load Tailwind v4 layers */
+@import "tailwindcss";
 
 :root {
   --background: #fff;

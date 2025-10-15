@@ -26,8 +26,24 @@ export async function setupVite(app: Express, server: Server) {
     allowedHosts: true as const,
   };
 
+  // ensure Vite root is the repository root so imports like /src/main.tsx resolve
+  const repoRoot = path.resolve(import.meta.dirname, '..', '..');
+
+  // Do NOT load the project's TS config file directly here (that triggers ESM/require errors).
+  // Instead provide the important runtime resolve aliases inline so the middleware can
+  // resolve imports like '@/components/..' without bundling the config file.
   const vite = await createViteServer({
+    root: repoRoot,
     configFile: false,
+    resolve: {
+      alias: {
+        react: path.resolve(repoRoot, 'node_modules/react'),
+        'react-dom': path.resolve(repoRoot, 'node_modules/react-dom'),
+        '@': path.resolve(repoRoot, 'src'),
+        '@/components': path.resolve(repoRoot, 'src/components'),
+        '@/lib': path.resolve(repoRoot, 'src/lib'),
+      },
+    },
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -44,14 +60,28 @@ export async function setupVite(app: Express, server: Server) {
     const url = req.originalUrl;
 
     try {
-      const clientTemplate = path.resolve(
-        import.meta.dirname,
-        "..",
-        "client",
-        "index.html",
-      );
+      // try multiple likely locations for the client index.html
+      const candidates = [
+        path.resolve(import.meta.dirname, "..", "client", "index.html"),
+        path.resolve(import.meta.dirname, "..", "..", "index.html"),
+        path.resolve(import.meta.dirname, "..", "..", "client", "index.html"),
+      ];
 
-      // always reload the index.html file from disk incase it changes
+      let clientTemplate: string | undefined;
+      for (const c of candidates) {
+        if (fs.existsSync(c)) {
+          clientTemplate = c;
+          break;
+        }
+      }
+
+      if (!clientTemplate) {
+        throw new Error(
+          `Could not find client index.html. Looked for: ${candidates.join(", ")}`,
+        );
+      }
+
+      // always reload the index.html file from disk in case it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,

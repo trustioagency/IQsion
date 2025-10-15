@@ -1,8 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 
+function getLocalStorageItem(key: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch (error) {
+    console.warn("localStorage erişimi yapılamadı, varsayılan değer kullanılıyor.", error);
+    return null;
+  }
+}
+
 export function useAuth() {
-  const isTestMode = window.location.search.includes('test=true');
-  const userUid = typeof window !== 'undefined' ? localStorage.getItem('userUid') : null;
+  const isTestMode = typeof window !== "undefined" && window.location.search.includes("test=true");
+  const userUid = getLocalStorageItem("userUid");
   const { data: user, isLoading, error } = useQuery({
     queryKey: isTestMode ? ["/api/auth/test-user"] : ["/api/auth/user", userUid],
     retry: false,

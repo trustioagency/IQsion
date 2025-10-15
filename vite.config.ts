@@ -9,12 +9,16 @@ export default defineConfig({
     alias: {
       react: path.resolve(__dirname, 'node_modules/react'),
       'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+      // project absolute imports like '@/components/..' -> ./src
+      '@': path.resolve(__dirname, 'src'),
+      '@/components': path.resolve(__dirname, 'src/components'),
+      '@/lib': path.resolve(__dirname, 'src/lib')
     },
   },
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:5000'
+      '/api': 'http://localhost:5001'
     }
   },
 });

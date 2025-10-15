@@ -17,15 +17,23 @@ export function LanguageProvider({ children }: LanguageProviderProps) {
   const [language, setLanguage] = useState<Language>('tr');
 
   useEffect(() => {
-    const savedLang = localStorage.getItem('language') as Language;
-    if (savedLang && (savedLang === 'tr' || savedLang === 'en')) {
-      setLanguage(savedLang);
+    try {
+      const savedLang = localStorage.getItem('language') as Language;
+      if (savedLang && (savedLang === 'tr' || savedLang === 'en')) {
+        setLanguage(savedLang);
+      }
+    } catch (error) {
+      console.warn('localStorage erişimi yapılamadı, varsayılan dil kullanılacak.', error);
     }
   }, []);
 
   const handleSetLanguage = (newLang: Language) => {
     setLanguage(newLang);
-    localStorage.setItem('language', newLang);
+    try {
+      localStorage.setItem('language', newLang);
+    } catch (error) {
+      console.warn('Dil tercihi kaydedilemedi.', error);
+    }
   };
 
   const t = (key: TranslationKey): string => {
