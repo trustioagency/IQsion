@@ -63,6 +63,7 @@ function Router() {
         <Header currentPage="Dashboard" />
         <main className="flex-1 overflow-y-auto bg-slate-800/50 p-6">
           <Switch>
+            <Route path="/dashboard" component={Dashboard} />
             <Route path="/" component={Dashboard} />
             <Route path="/market-analysis" component={MarketAnalysis} />
             <Route path="/competitor-analysis" component={CompetitorAnalysis} />

@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -7,7 +8,19 @@ import { Label } from "../components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
+type InputChangeEvent = {
+  target: {
+    name: string;
+    value: string;
+  };
+};
+
+type FormSubmitEvent = {
+  preventDefault: () => void;
+};
+
 export default function Auth() {
+  const [, setLocation] = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -19,31 +32,51 @@ export default function Auth() {
     companyName: ''
   });
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: InputChangeEvent) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const persistUserUid = (uid: string | undefined) => {
+    if (!uid) return;
+    try {
+      window.localStorage.setItem('userUid', uid);
+    } catch (error) {
+      console.warn('Kullanıcı oturumu localStorage\'a kaydedilemedi.', error);
+    }
+  };
+
+  const handleLogin = async (e: FormSubmitEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // Save example user UID to localStorage
-      localStorage.setItem('userUid', 'demo-uid-123');
-      // Redirect to onboarding after successful login
-      window.location.href = '/onboarding';
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        })
+      });
+      const result = await response.json().catch(() => undefined);
+      if (!response.ok) {
+        throw new Error(result?.message || 'Giriş başarısız.');
+      }
+  persistUserUid(result?.uid ?? 'demo-uid-123');
+      setLocation('/');
     } catch (error) {
       console.error('Login error:', error);
+      alert((error instanceof Error ? error.message : 'Giriş başarısız.') + '\nDemo hesabıyla devam ediliyor.');
+      persistUserUid('demo-uid-123');
+      setLocation('/');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
+  const handleSignup = async (e: FormSubmitEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
@@ -54,12 +87,28 @@ export default function Auth() {
     }
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // Redirect to onboarding after successful signup
-      window.location.href = '/onboarding';
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          companyName: formData.companyName,
+        })
+      });
+      const result = await response.json().catch(() => undefined);
+      if (!response.ok) {
+        throw new Error(result?.message || 'Kayıt başarısız.');
+      }
+  persistUserUid(result?.uid ?? 'demo-uid-123');
+      setLocation('/onboarding');
     } catch (error) {
       console.error('Signup error:', error);
+      alert((error instanceof Error ? error.message : 'Kayıt başarısız.') + '\nDemo hesabıyla devam ediliyor.');
+      persistUserUid('demo-uid-123');
+      setLocation('/onboarding');
     } finally {
       setIsLoading(false);
     }

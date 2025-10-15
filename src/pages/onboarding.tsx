@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -8,6 +8,7 @@ import { Label } from "../components/ui/label";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { CheckCircle, ArrowRight, ArrowLeft } from "lucide-react";
+import { getNavigationUrl } from "../lib/navigation";
 
 interface OnboardingData {
   // Temel Bilgiler
@@ -76,6 +77,19 @@ export default function Onboarding() {
     competitiveAdvantage: ''
   });
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const onboardingStatus = window.localStorage.getItem("onboardingComplete");
+      if (onboardingStatus === "true") {
+        const destination = getNavigationUrl("/");
+        setLocation(destination);
+      }
+    } catch (error) {
+      console.warn("Onboarding durumu okunamadı.", error);
+    }
+  }, [setLocation]);
+
   const handleInputChange = (field: keyof OnboardingData, value: string | string[]) => {
     setFormData(prev => ({
       ...prev,
@@ -87,7 +101,7 @@ export default function Onboarding() {
     if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     } else if (currentStep === 5) {
-      setCurrentStep(6); // Tamamla adımında otomatik dashboard'a yönlendirme
+      setCurrentStep(6);
     }
   };
 
@@ -98,9 +112,24 @@ export default function Onboarding() {
   };
 
   const handleComplete = () => {
-    // Save onboarding data and redirect to dashboard
     console.log('Onboarding completed:', formData);
-    window.location.href = '/dashboard';
+    if (typeof window !== "undefined") {
+      const destination = getNavigationUrl("/");
+      try {
+        window.localStorage.setItem("onboardingComplete", "true");
+      } catch (error) {
+        console.warn("Onboarding durumu kaydedilemedi.", error);
+      }
+      setLocation(destination);
+      setTimeout(() => {
+        const currentPath = `${window.location.pathname}${window.location.search}`;
+        if (currentPath !== destination) {
+          window.location.assign(destination);
+        }
+      }, 150);
+    } else {
+      setLocation('/');
+    }
   };
 
   const renderStep = () => {
@@ -652,12 +681,6 @@ export default function Onboarding() {
     }
   };
 
-  // Tamamlandı adımında dashboard'a yönlendir
-  if (currentStep === 6) {
-    setLocation('/dashboard');
-    return null;
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-2xl mx-auto">
@@ -666,10 +689,10 @@ export default function Onboarding() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-2xl font-bold text-gray-900">Markanızı Tanıyalım</h1>
             <span className="text-sm text-gray-500">
-              {currentStep}/5 Adım
+              {currentStep > 5 ? '5/5 Adım' : `${currentStep}/5 Adım`}
             </span>
           </div>
-          <Progress value={(currentStep / 5) * 100} className="w-full" />
+          <Progress value={Math.min((currentStep / 5) * 100, 100)} className="w-full" />
           
           {currentStep <= 5 && (
             <div className="mt-4">
