@@ -60,6 +60,8 @@ export async function setupVite(app: Express, server: Server) {
     const url = req.originalUrl;
 
     try {
+      // API isteklerini bu middleware'den çıkart
+      if (url.startsWith('/api')) return next();
       // try multiple likely locations for the client index.html
       const candidates = [
         path.resolve(import.meta.dirname, "..", "client", "index.html"),

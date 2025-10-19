@@ -244,7 +244,7 @@ export default function Dashboard() {
 
       {/* Enhanced Controls Section */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">{t('Genel Bakış')}</h1>
+  <h1 className="text-2xl font-bold text-white">{t('genelBakış')}</h1>
         <div className="flex items-center gap-4">
           {/* Channel Selector */}
           <div className="flex items-center gap-2">

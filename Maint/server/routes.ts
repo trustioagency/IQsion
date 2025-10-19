@@ -2,6 +2,17 @@
 import express from "express";
 import admin from "./firebase";
 import axios from "axios";
+// Basit fetch timeout helper
+async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res as unknown as Response;
+  } finally {
+    clearTimeout(id);
+  }
+}
 const router = express.Router();
 
 // Kullanıcı bilgisi döndüren endpoint
@@ -44,9 +55,53 @@ router.get('/api/auth/user', async (req, res) => {
   }
 });
 
+// Test kullanıcı endpointi: useAuth test modunda bunu çağırır
+router.get('/api/auth/test-user', async (_req, res) => {
+  return res.json({
+    uid: 'demo-uid-123',
+    email: 'demo@demo.com',
+    firstName: 'Demo',
+    lastName: 'Kullanıcı',
+    companyName: 'Demo Şirketi',
+    profileImageUrl: '',
+  });
+});
+
 // Test endpoint: Router ve Express çalışıyor mu?
 router.get('/api/test', (req, res) => {
   res.json({ message: 'API çalışıyor' });
+});
+
+// Marka profili oku
+router.get('/api/brand-profile', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const snap = await admin.database().ref(`brandProfiles/${uid}`).once('value');
+    const data = snap.val() || {};
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ message: 'Brand profile alınamadı', error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Marka profili güncelle
+router.post('/api/brand-profile', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const payload = req.body || {};
+    await admin.database().ref(`brandProfiles/${uid}`).update({
+      ...payload,
+      updatedAt: Date.now(),
+    });
+    const snap = await admin.database().ref(`brandProfiles/${uid}`).once('value');
+    return res.json(snap.val() || {});
+  } catch (err) {
+    return res.status(500).json({ message: 'Brand profile güncellenemedi', error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // (tekrar) kaldırıldı
@@ -179,7 +234,7 @@ router.get('/api/shopify/products', async (req, res) => {
     const costsSnap = await admin.database().ref(`shopifyProductCosts/${userId}`).once('value');
     const costs = costsSnap.val() || {};
     // Her ürüne cost ekle
-    const productsWithCost = products.map(p => ({
+    const productsWithCost = products.map((p: any) => ({
       ...p,
       cost: costs[p.id] || ""
     }));
@@ -637,14 +692,11 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   // Google Analytics veri çekme endpointi
   router.get('/api/analytics/summary', async (req, res) => {
     try {
-      console.log('[GA] /api/analytics/summary endpointine istek geldi:', {
-        query: req.query
-      });
+      // Minimum log: istek geldi
       const userId = req.query.userId || 'test-user';
       const snapshot = await admin.database().ref(`platformConnections/${userId}/google_analytics`).once('value');
       const connection = snapshot.val();
       if (!connection || !connection.accessToken) {
-        console.error('Google Analytics bağlantısı yok veya token bulunamadı.', { connection });
         return res.status(400).json({ message: 'Google Analytics bağlantısı yok veya token bulunamadı.' });
       }
       // Token süresi kontrolü ve otomatik yenileme
@@ -659,11 +711,11 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET!);
           params.append('refresh_token', connection.refreshToken);
           params.append('grant_type', 'refresh_token');
-          const resp = await fetch('https://oauth2.googleapis.com/token', {
+          const resp = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params,
-          });
+          }, 10000);
           const data = await resp.json();
           if (data.access_token) {
             accessToken = data.access_token;
@@ -673,13 +725,10 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
               expiresAt: expiresAt.toISOString(),
               updatedAt: now.toISOString(),
             });
-            console.log('Google Analytics accessToken otomatik yenilendi. Yeni expiresAt:', expiresAt.toISOString());
           } else {
-            console.error('Google Analytics accessToken yenileme başarısız:', data);
             return res.status(401).json({ message: 'Google Analytics accessToken yenileme başarısız.', error: data });
           }
         } catch (err) {
-          console.error('Google Analytics accessToken yenileme hatası:', err);
           return res.status(500).json({ message: 'Google Analytics accessToken yenileme hatası.', error: err });
         }
       }
@@ -689,6 +738,16 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       if (!startDate || !endDate) {
         startDate = '7daysAgo';
         endDate = 'today';
+      }
+      // Basit cache: 2 dakika
+      const cacheKey = `cache/ga/summary/${userId}/${propertyId}/${startDate}-${endDate}`;
+      const cacheSnap = await admin.database().ref(cacheKey).once('value');
+      const cached = cacheSnap.val();
+      const nowTs = Date.now();
+      const ttlMs = 2 * 60 * 1000;
+      if (cached && cached.cachedAt && (nowTs - cached.cachedAt) < ttlMs) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cached.data);
       }
       const requestBody = {
         dateRanges: [{ startDate, endDate }],
@@ -747,7 +806,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       res.status(500).json({ message: 'Bağlantı güncellenemedi', error });
     }
   });
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
         {
           method: 'POST',
@@ -756,19 +815,20 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestBody),
-        }
+        },
+        10000
       );
       if (response.ok) {
         const data = await response.json();
-        console.log('Google Analytics API response:', JSON.stringify(data, null, 2));
+        // Cache yaz
+        await admin.database().ref(cacheKey).set({ data, cachedAt: Date.now() });
+        res.setHeader('X-Cache', 'MISS');
         res.json(data);
       } else {
         const errorData = await response.text();
-        console.error('Google Analytics API error:', errorData);
         res.status(500).json({ message: 'Veri çekilemedi', error: errorData });
       }
     } catch (error) {
-  console.error('[GA] Google Analytics veri çekme hatası:', error);
   res.status(500).json({ message: '[GA] Veri çekilemedi', error });
     }
   });
@@ -777,6 +837,22 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   router.get('/api/auth/google/callback', async (req, res) => {
     const code = req.query.code;
     let propertyId = req.query.propertyId;
+    const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
+    // state içinden userId yakala (format: uid:<uid>|<random>)
+    let stateUserId: string | null = null;
+    if (stateParam) {
+      try {
+        if (stateParam.startsWith('uid:')) {
+          stateUserId = stateParam.split('|')[0].replace('uid:', '');
+        } else {
+          // JSON taşındıysa
+          const maybe = JSON.parse(stateParam);
+          if (maybe && typeof maybe.uid === 'string') stateUserId = maybe.uid;
+        }
+      } catch (_) {
+        // yoksay
+      }
+    }
     if (!code) {
       return res.redirect('http://localhost:5173/settings?connection=error&platform=google_analytics');
     }
@@ -785,7 +861,8 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       params.append('code', code as string);
       params.append('client_id', process.env.GOOGLE_CLIENT_ID!);
       params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET!);
-      params.append('redirect_uri', process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/auth/google/callback');
+      const effectiveRedirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      params.append('redirect_uri', effectiveRedirectUri);
       params.append('grant_type', 'authorization_code');
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -796,7 +873,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       if (tokenData.error) {
         return res.redirect('/settings?connection=error&platform=google_analytics');
       }
-      const userId = req.query.userId || 'test-user';
+      const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
       // Eğer propertyId yoksa Google Analytics API'dan otomatik çek
       if (!propertyId) {
         try {
@@ -858,7 +935,10 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       'email',
       'profile'
     ].join(' ');
-    const state = encodeURIComponent(Math.random().toString(36).substring(2));
+    const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
+    // userId'yi state ile taşı
+    const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+    const state = encodeURIComponent(stateRaw);
     const authUrl =
       `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${clientId}` +
@@ -875,71 +955,140 @@ export default router;
 // Google Analytics property listesi endpointi
 router.get('/api/analytics/properties', async (req, res) => {
   const userId = req.query.userId || 'test-user';
+  const force = req.query.force === '1' || req.query.force === 'true';
   try {
-    // Kullanıcının access token'ını veritabanından al
+    // Kullanıcının GA bağlantısını al
     const snapshot = await admin.database().ref(`platformConnections/${userId}/google_analytics`).once('value');
     const gaConn = snapshot.val();
-    console.log('[GA DEBUG] userId:', userId);
-    console.log('[GA DEBUG] gaConn:', gaConn);
     if (!gaConn || !gaConn.accessToken) {
-      console.error('[GA DEBUG] Access token bulunamadı!');
-      return res.status(400).json({ properties: [] });
+      return res.status(400).json({ properties: [], error: 'no_token' });
     }
-    // Token süresi ve scope logu
-    if (gaConn.expiresAt) {
-      console.log('[GA DEBUG] Token expiresAt:', gaConn.expiresAt);
-    }
-    if (gaConn.scope) {
-      console.log('[GA DEBUG] Token scope:', gaConn.scope);
-    }
-    // Google Analytics hesabındaki property listesini çek
-    const accountsRes = await fetch('https://analyticsadmin.googleapis.com/v1alpha/accounts', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${gaConn.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    const accountsData = await accountsRes.json();
-    console.log('[GA DEBUG] accountsData:', accountsData);
-    if (!accountsData.accounts || accountsData.accounts.length === 0) {
-      console.error('[GA DEBUG] Hesap bulunamadı veya boş!');
-      return res.json({ properties: [] });
-    }
-  let allProperties: { id: string; name: string }[] = [];
-    for (const acc of accountsData.accounts) {
-      const accountId = acc.name.split('/')[1];
-      console.log('[GA DEBUG] accountId:', accountId);
-      try {
-        const propertiesRes = await fetch(`https://analyticsadmin.googleapis.com/v1alpha/accounts/${accountId}/properties`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${gaConn.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        console.log(`[GA DEBUG] propertiesRes.status for account ${accountId}:`, propertiesRes.status);
-        const propertiesText = await propertiesRes.text();
-        console.log(`[GA DEBUG] propertiesRes.body for account ${accountId}:`, propertiesText);
-        let propertiesData;
-        try {
-          propertiesData = JSON.parse(propertiesText);
-        } catch (e) {
-          console.error(`[GA DEBUG] JSON parse hatası for account ${accountId}:`, e);
-          continue;
-        }
-        const properties = (propertiesData.properties || []).map((p: any) => ({
-          id: p.name.replace('properties/', ''),
-          name: p.displayName || p.name,
-        }));
-        allProperties = allProperties.concat(properties);
-      } catch (err) {
-        console.error(`[GA DEBUG] Property fetch hatası for account ${accountId}:`, err);
+
+    // Token ve cache hazırlığı
+    let accessToken: string = gaConn.accessToken;
+    const cacheKey = `cache/ga/properties/${userId}`;
+
+    // Cache (force değilse)
+    if (!force) {
+      const cacheSnap = await admin.database().ref(cacheKey).once('value');
+      const cached = cacheSnap.val();
+      const nowTs = Date.now();
+      const ttlMs = 10 * 60 * 1000; // 10 dakika
+      if (cached && cached.cachedAt && (nowTs - cached.cachedAt) < ttlMs) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json({ properties: cached.properties || [] });
       }
     }
-    return res.json({ properties: allProperties });
+
+    // Gerekirse token yenile (expiresAt geçmişse) – sessiz dene
+    try {
+      const now = new Date();
+      const expiresAt = gaConn.expiresAt ? new Date(gaConn.expiresAt) : null;
+      if (expiresAt && expiresAt < now && gaConn.refreshToken) {
+        const params = new URLSearchParams();
+        params.append('client_id', process.env.GOOGLE_CLIENT_ID!);
+        params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET!);
+        params.append('refresh_token', gaConn.refreshToken);
+        params.append('grant_type', 'refresh_token');
+        const resp = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params,
+        }, 10000);
+        const data = await resp.json();
+        if (data.access_token) {
+          accessToken = data.access_token;
+          const newExpires = new Date(now.getTime() + (data.expires_in || 3600) * 1000);
+          await admin.database().ref(`platformConnections/${userId}/google_analytics`).update({
+            accessToken,
+            expiresAt: newExpires.toISOString(),
+            updatedAt: now.toISOString(),
+          });
+        }
+      }
+    } catch (_) {}
+
+    // İsteğe bağlı: yetkili Google hesabının e-postasını çek (debug amaçlı)
+    let meEmail: string | undefined;
+    try {
+      const meResp = await fetchWithTimeout('https://www.googleapis.com/oauth2/v3/userinfo', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      }, 8000);
+      if (meResp.ok) {
+        const me = await meResp.json();
+        meEmail = me.email;
+      }
+    } catch (_) {}
+
+    // accountSummaries üzerinden tüm property'leri topla (v1beta)
+    let allProperties: { id: string; name: string; accountId?: string }[] = [];
+    let nextPageToken: string | undefined;
+    let triedRefresh = false;
+
+    const fetchSummaries = async (tokenToUse: string) => {
+      const url = new URL('https://analyticsadmin.googleapis.com/v1beta/accountSummaries');
+      url.searchParams.set('pageSize', '200');
+      if (nextPageToken) url.searchParams.set('pageToken', String(nextPageToken));
+      const resp = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${tokenToUse}`,
+          'Content-Type': 'application/json',
+        },
+      }, 10000);
+      return resp;
+    };
+
+    do {
+      let resp = await fetchSummaries(accessToken);
+      if (resp.status === 401 && gaConn.refreshToken && !triedRefresh) {
+        // Bir kez token yenileyip tekrar dene
+        triedRefresh = true;
+        try {
+          const params = new URLSearchParams();
+          params.append('client_id', process.env.GOOGLE_CLIENT_ID!);
+          params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET!);
+          params.append('refresh_token', gaConn.refreshToken);
+          params.append('grant_type', 'refresh_token');
+          const refreshResp = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params,
+          }, 10000);
+          const data = await refreshResp.json();
+          if (data.access_token) {
+            accessToken = data.access_token;
+            resp = await fetchSummaries(accessToken);
+          }
+        } catch (_) {}
+      }
+      if (!resp.ok) {
+        const raw = await resp.text();
+        return res.status(resp.status).json({ properties: [], error: 'admin_account_summaries_failed', raw });
+      }
+      const json = await resp.json();
+      const summaries = json.accountSummaries || [];
+      for (const s of summaries) {
+        const accountId = String(s.account).split('/')[1];
+        const props = s.propertySummaries || [];
+        for (const p of props) {
+          allProperties.push({
+            id: String(p.property).replace('properties/', ''),
+            name: p.displayName || p.property,
+            accountId,
+          });
+        }
+      }
+      nextPageToken = json.nextPageToken;
+    } while (nextPageToken);
+
+    if (allProperties.length > 0) {
+      await admin.database().ref(cacheKey).set({ properties: allProperties, cachedAt: Date.now() });
+      res.setHeader('X-Cache', 'MISS');
+    }
+    return res.json({ properties: allProperties, meEmail });
   } catch (err) {
-    console.error('[GA DEBUG] Hata:', err);
-    return res.status(500).json({ properties: [] });
+    return res.status(500).json({ properties: [], error: 'server_error' });
   }
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -10,7 +10,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
 import { isUnauthorizedError } from "../lib/authUtils";
 import { apiRequest, queryClient } from "../lib/queryClient";
-import { type User as UserType } from "../shared/schema";
+import { type User as UserType } from "../types/user";
 import { 
   User, 
   Building, 
@@ -43,12 +43,13 @@ interface PlatformConnection {
   isConnected: boolean;
   accountName?: string;
   lastSyncAt?: string;
+  propertyId?: string;
 }
 
 export default function Settings() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [profileData, setProfileData] = useState<BrandProfile>({});
+  const [profileData, setProfileData] = useState<BrandProfile>({} as BrandProfile);
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -68,18 +69,62 @@ export default function Settings() {
   }, [user, authLoading, toast]);
 
   const { data: brandProfile, isLoading: profileLoading } = useQuery({
-    queryKey: ['/api/brand-profile'],
+    queryKey: ['brand-profile', (user as any)?.uid || (user as any)?.id],
     enabled: !!user,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id;
+      const res = await fetch('/api/brand-profile', {
+        credentials: 'include',
+        headers: uid ? { 'x-user-uid': uid } : {},
+      });
+      if (!res.ok) return {};
+      return res.json();
+    }
   });
 
   const { data: connections } = useQuery({
-    queryKey: ['/api/connections'],
+    queryKey: ['connections', (user as any)?.uid || (user as any)?.id],
     enabled: !!user,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await fetch(`/api/connections?userId=${encodeURIComponent(uid)}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) return {};
+      return res.json();
+    }
+  });
+
+  // Google Analytics properties listesi
+  const { data: gaProperties, isLoading: gaPropsLoading } = useQuery({
+    queryKey: ['ga-properties', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await fetch(`/api/analytics/properties?userId=${encodeURIComponent(uid)}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) return { properties: [] };
+      return res.json();
+    },
   });
 
   const profileMutation = useMutation({
     mutationFn: async (data: BrandProfile) => {
-      const response = await apiRequest('POST', '/api/brand-profile', data);
+      const uid = (user as any)?.uid || (user as any)?.id;
+      const response = await fetch('/api/brand-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(uid ? { 'x-user-uid': uid } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Profile update failed');
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -87,7 +132,7 @@ export default function Settings() {
         title: "Success",
         description: "Brand profile updated successfully",
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/brand-profile'] });
+  queryClient.invalidateQueries({ queryKey: ['brand-profile'] });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
@@ -97,7 +142,7 @@ export default function Settings() {
           variant: "destructive",
         });
         setTimeout(() => {
-          window.location.href = "/api/login";
+          window.location.href = "/auth";
         }, 500);
         return;
       }
@@ -120,14 +165,14 @@ export default function Settings() {
   };
 
   const handleInputChange = (field: keyof BrandProfile, value: string) => {
-    setProfileData(prev => ({ ...prev, [field]: value }));
+    setProfileData((prev: BrandProfile) => ({ ...(prev || {}), [field]: value }));
   };
 
   const handleConnectPlatform = async (platformId: string) => {
     try {
       if (!user) return;
       
-      const userId = (user as UserType).id;
+      const uid = ((user as any)?.uid || (user as any)?.id) as string | undefined;
       let authUrl = '';
       const baseUrl = window.location.origin;
       
@@ -135,22 +180,25 @@ export default function Settings() {
         case 'shopify':
           const shopName = prompt('Shopify mağaza adınızı girin (örn: mystore):');
           if (!shopName) return;
-          authUrl = `https://${shopName}.myshopify.com/admin/oauth/authorize?client_id=${import.meta.env.VITE_SHOPIFY_API_KEY}&scope=read_orders,read_products,read_analytics&redirect_uri=${baseUrl}/api/shopify/callback&state=${userId}`;
+          // Backend üzerinden OAuth başlat
+          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(`${shopName}.myshopify.com`)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_ads':
-          authUrl = `https://accounts.google.com/oauth2/auth?client_id=${import.meta.env.VITE_GOOGLE_CLIENT_ID}&redirect_uri=${baseUrl}/api/google/callback&scope=https://www.googleapis.com/auth/adwords&response_type=code&state=${userId}`;
+          authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'meta':
-          authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${import.meta.env.VITE_META_APP_ID}&redirect_uri=${baseUrl}/api/meta/callback&scope=ads_management,ads_read&response_type=code&state=${userId}`;
+          authUrl = `/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_analytics':
-          authUrl = `https://accounts.google.com/oauth2/auth?client_id=${import.meta.env.VITE_GOOGLE_CLIENT_ID}&redirect_uri=${baseUrl}/api/analytics/callback&scope=https://www.googleapis.com/auth/analytics.readonly&response_type=code&state=${userId}`;
+          authUrl = `/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'tiktok':
-          authUrl = `https://business-api.tiktok.com/portal/auth?app_id=${import.meta.env.VITE_TIKTOK_APP_ID}&redirect_uri=${baseUrl}/api/tiktok/callback&scope=user_info:basic,ad_management:read&state=${userId}`;
+          toast({ title: 'Bilgi', description: 'TikTok entegrasyonu yakında eklenecek.' });
+          return;
           break;
         case 'google_search_console':
-          authUrl = `https://accounts.google.com/oauth2/auth?client_id=${import.meta.env.VITE_GOOGLE_CLIENT_ID}&redirect_uri=${baseUrl}/api/search-console/callback&scope=https://www.googleapis.com/auth/webmasters.readonly&response_type=code&state=${userId}`;
+          toast({ title: 'Bilgi', description: 'Search Console entegrasyonu yakında eklenecek.' });
+          return;
           break;
         default:
           toast({
@@ -180,20 +228,37 @@ export default function Settings() {
 
   const handleDisconnectPlatform = async (platformId: string) => {
     try {
-      await apiRequest('POST', '/api/platforms/disconnect', { platform: platformId });
+      const uid = (user as any)?.uid || (user as any)?.id;
+      await apiRequest('POST', '/api/disconnect', { platform: platformId, userId: uid });
       
       toast({
         title: "Başarılı",
         description: "Platform bağlantısı kesildi",
       });
       
-      queryClient.invalidateQueries({ queryKey: ['/api/connections'] });
+  queryClient.invalidateQueries({ queryKey: ['connections'] });
     } catch (error) {
       toast({
         title: "Hata",
         description: "Platform bağlantısı kesilemedi",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleSaveGoogleAnalyticsProperty = async (propertyId: string) => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id;
+      const resp = await apiRequest('POST', '/api/connections', {
+        platform: 'google_analytics',
+        propertyId,
+        userId: uid,
+      });
+      await resp.json();
+      toast({ title: 'Başarılı', description: 'Google Analytics property seçimi kaydedildi' });
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Property kaydedilemedi', variant: 'destructive' });
     }
   };
 
@@ -209,7 +274,7 @@ export default function Settings() {
     return null; // Will redirect in useEffect
   }
 
-  const platformIcons: Record<string, React.ReactNode> = {
+  const platformIcons: Record<string, any> = {
     shopify: <Building className="w-5 h-5" />,
     meta: <Zap className="w-5 h-5" />,
     google_ads: <Globe className="w-5 h-5" />,
@@ -266,7 +331,8 @@ export default function Settings() {
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {platforms.map((platform) => {
-                    const connection = (connections as PlatformConnection[])?.find((c: PlatformConnection) => c.platform === platform.id);
+                    const connectionsMap = (connections as any as Record<string, PlatformConnection>) || {};
+                    const connection = connectionsMap[platform.id];
                     const isConnected = connection?.isConnected || false;
 
                     return (
@@ -283,6 +349,28 @@ export default function Settings() {
                                   <p className="text-sm text-slate-400">
                                     {connection.accountName}
                                   </p>
+                                )}
+                                {/* Google Analytics property seçimi */}
+                                {platform.id === 'google_analytics' && isConnected && (
+                                  <div className="mt-2">
+                                    <label className="block text-xs text-slate-400 mb-1">Property</label>
+                                    <Select
+                                      value={connection?.propertyId || ''}
+                                      onValueChange={(value) => handleSaveGoogleAnalyticsProperty(value)}
+                                    >
+                                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                        <SelectValue placeholder={gaPropsLoading ? 'Yükleniyor…' : 'Property seç'} />
+                                      </SelectTrigger>
+                                      <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                        {(gaProperties?.properties || []).length === 0 && (
+                                          <div className="px-3 py-2 text-slate-400 text-sm">Uygun property bulunamadı</div>
+                                        )}
+                                        {(gaProperties?.properties || []).map((p: any) => (
+                                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
                                 )}
                               </div>
                             </div>

@@ -55,9 +55,24 @@ export function useAuth() {
     },
   });
 
+  const logout = () => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("userUid");
+      }
+    } catch (err) {
+      // ignore
+    }
+    // Yönlendirme: test=true parametresini de temizleyerek /auth'a gönder
+    if (typeof window !== "undefined") {
+      window.location.href = "/auth";
+    }
+  };
+
   return {
     user,
     isLoading,
     isAuthenticated: !!user,
+    logout,
   };
 }
