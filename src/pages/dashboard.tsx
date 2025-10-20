@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -18,18 +18,25 @@ import {
   Play, AlertTriangle, Eye, CheckCircle
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
+import { Clock as ClockIcon } from 'lucide-react';
 
 type DateRangeKey = '7d' | '30d' | '90d' | 'custom';
 type ChannelKey = 'all' | 'google' | 'meta' | 'tiktok' | 'email' | 'organic';
 type MetricKey = 'revenue' | 'roas' | 'conversions' | 'traffic' | 'cost';
 
-interface DashboardData {
-  totalRevenue: number;
-  totalAdSpend: number;
-  avgRoas: number;
-  totalConversions: number;
-  metrics: any[];
-}
+// GA API response minimal typings
+type GaMetricRow = {
+  date: string; // YYYYMMDD
+  sessions: number;
+  newUsers: number;
+  activeUsers: number;
+  averageSessionDuration: number; // seconds
+  eventCount: number;
+};
+
+type GaSummary = {
+  rows: GaMetricRow[];
+};
 
 export default function Dashboard() {
   const { user, isLoading: authLoading } = useAuth();
@@ -59,9 +66,74 @@ export default function Dashboard() {
     }
   }, [user, authLoading, toast, t]);
 
-  const { data: dashboardData, isLoading } = useQuery({
-    queryKey: ['/api/dashboard', dateRange, selectedChannel],
+  // Helper: map DateRangeKey to GA date ranges
+  const makeGaRange = (key: DateRangeKey) => {
+    switch (key) {
+      case '7d':
+        return { startDate: '7daysAgo', endDate: 'today' };
+      case '30d':
+        return { startDate: '30daysAgo', endDate: 'today' };
+      case '90d':
+        return { startDate: '90daysAgo', endDate: 'today' };
+      default:
+        return { startDate: '7daysAgo', endDate: 'today' };
+    }
+  };
+
+  const uid = (user as any)?.uid || (user as any)?.id;
+
+  // 1) Fetch platform connections to read selected GA propertyId
+  const { data: connections } = useQuery({
+    queryKey: ['connections', uid],
     enabled: !!user,
+    queryFn: async () => {
+      const res = await fetch(`/api/connections?userId=${encodeURIComponent(uid)}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) return {} as any;
+      return res.json();
+    }
+  });
+
+  const selectedGaPropertyId: string | undefined = (connections as any)?.google_analytics?.propertyId;
+
+  // 2) Fetch GA summary if property selected
+  const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
+    queryKey: ['ga-summary', uid, selectedGaPropertyId, dateRange],
+    enabled: !!user && !!selectedGaPropertyId,
+    queryFn: async () => {
+      const { startDate, endDate } = makeGaRange(dateRange);
+      const url = new URL('/api/analytics/summary', window.location.origin);
+      url.searchParams.set('userId', uid);
+      url.searchParams.set('propertyId', selectedGaPropertyId!);
+      url.searchParams.set('startDate', startDate);
+      url.searchParams.set('endDate', endDate);
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      if (!res.ok) return null;
+      const json = await res.json();
+      // Parse GA v1beta runReport response into rows
+      const dimIndex = (json.dimensionHeaders || []).findIndex((d: any) => d.name === 'date');
+      const mNames = (json.metricHeaders || []).map((m: any) => m.name);
+      const rows: GaMetricRow[] = (json.rows || []).map((r: any) => {
+        const date = dimIndex >= 0 ? r.dimensionValues[dimIndex]?.value : '';
+        const metrics = r.metricValues || [];
+        const get = (name: string) => {
+          const idx = mNames.indexOf(name);
+          const raw = idx >= 0 ? metrics[idx]?.value : '0';
+          const num = Number(raw);
+          return Number.isFinite(num) ? num : 0;
+        };
+        return {
+          date,
+          sessions: get('sessions'),
+          newUsers: get('newUsers'),
+          activeUsers: get('activeUsers'),
+          averageSessionDuration: get('averageSessionDuration'),
+          eventCount: get('eventCount'),
+        } as GaMetricRow;
+      });
+      return { rows };
+    }
   });
 
   // Channel options
@@ -83,59 +155,55 @@ export default function Dashboard() {
     { value: 'cost', label: language === 'tr' ? 'Maliyet' : 'Cost', icon: BarChart3 }
   ];
 
-  // Mock data for demo - now includes comparison data
-  const kpiData = [
-    {
-      title: t('totalRevenue'),
-      value: "₺847,650",
-      previousValue: "₺753,200",
-      change: "+12.5%",
-      changeType: "positive" as const,
-      icon: DollarSign,
-      color: "text-emerald-500",
-      bgColor: "bg-emerald-500/10"
-    },
-    {
-      title: "ROAS",
-      value: "4.2x",
-      previousValue: "3.9x",
-      change: "+8.1%",
-      changeType: "positive" as const,
-      icon: Target,
-      color: "text-blue-500",
-      bgColor: "bg-blue-500/10"
-    },
-    {
-      title: language === 'tr' ? 'Dönüşüm Oranı' : 'Conversion Rate',
-      value: "3.84%",
-      previousValue: "3.32%",
-      change: "+15.2%",
-      changeType: "positive" as const,
-      icon: TrendingUp,
-      color: "text-purple-500",
-      bgColor: "bg-purple-500/10"
-    },
-    {
-      title: language === 'tr' ? 'Aktif Müşteriler' : 'Active Customers',
-      value: "12,847",
-      previousValue: "11,983",
-      change: "+7.3%",
-      changeType: "positive" as const,
-      icon: Users,
-      color: "text-orange-500",
-      bgColor: "bg-orange-500/10"
-    }
-  ];
+  // Helpers to format metrics
+  const fmtNumber = (n: number) => new Intl.NumberFormat('tr-TR').format(Math.round(n));
+  const fmtDuration = (s: number) => {
+    if (!s || !Number.isFinite(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const ss = Math.round(s % 60);
+    return `${m}:${ss.toString().padStart(2, '0')}`;
+  };
 
-  const chartData = [
-    { date: '1 Ara', revenue: 65000, conversions: 245, previousRevenue: 58000, previousConversions: 220 },
-    { date: '5 Ara', revenue: 72000, conversions: 267, previousRevenue: 64000, previousConversions: 240 },
-    { date: '10 Ara', revenue: 68000, conversions: 251, previousRevenue: 61000, previousConversions: 225 },
-    { date: '15 Ara', revenue: 84000, conversions: 312, previousRevenue: 75000, previousConversions: 280 },
-    { date: '20 Ara', revenue: 91000, conversions: 338, previousRevenue: 82000, previousConversions: 305 },
-    { date: '25 Ara', revenue: 87000, conversions: 325, previousRevenue: 78000, previousConversions: 290 },
-    { date: '30 Ara', revenue: 95000, conversions: 356, previousRevenue: 85000, previousConversions: 315 }
-  ];
+  // Build KPI data from GA rows
+  const kpiData = useMemo(() => {
+    if (!gaSummary?.rows?.length) {
+      return [
+        { title: 'Sessions', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
+        { title: 'New Users', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+        { title: 'Active Users', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+        { title: 'Avg. Session Duration', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+      ];
+    }
+    const total = gaSummary.rows.reduce((acc, r) => {
+      acc.sessions += r.sessions;
+      acc.newUsers += r.newUsers;
+      acc.activeUsers += r.activeUsers;
+      acc.eventCount += r.eventCount;
+      acc.durationSum += r.averageSessionDuration;
+      acc.durationCount += 1;
+      return acc;
+    }, { sessions: 0, newUsers: 0, activeUsers: 0, eventCount: 0, durationSum: 0, durationCount: 0 });
+    const avgDuration = total.durationCount ? total.durationSum / total.durationCount : 0;
+    return [
+      { title: 'Sessions', value: fmtNumber(total.sessions), previousValue: '', change: '', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
+      { title: 'New Users', value: fmtNumber(total.newUsers), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+      { title: 'Active Users', value: fmtNumber(total.activeUsers), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+      { title: 'Avg. Session Duration', value: fmtDuration(avgDuration), previousValue: '', change: '', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+    ];
+  }, [gaSummary]);
+
+  const chartData = useMemo(() => {
+    if (!gaSummary?.rows?.length) return [] as Array<{ date: string; primary: number; secondary: number }>;
+    const fmtDate = (yyyymmdd: string) => {
+      if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
+      return `${yyyymmdd.slice(6, 8)}.${yyyymmdd.slice(4, 6)}`; // dd.MM
+    };
+    return gaSummary.rows.map(r => ({
+      date: fmtDate(r.date),
+      primary: r.sessions,
+      secondary: r.newUsers,
+    }));
+  }, [gaSummary]);
 
   const insights = [
     {
@@ -223,7 +291,9 @@ export default function Dashboard() {
     }
   ];
 
-  if (authLoading || isLoading) {
+  const gaConnected = !!selectedGaPropertyId;
+
+  if (authLoading || (isLoading && gaConnected)) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-white text-lg">Loading...</div>
@@ -333,6 +403,18 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* If GA not connected, show quick CTA */}
+      {!gaConnected && (
+        <Card className="bg-amber-500/10 border-amber-500/30">
+          <CardContent className="p-4 text-amber-200">
+            Google Analytics bağlantısı veya property seçimi bulunamadı. Lütfen Settings sayfasından bağlayın ve property seçin.
+            <Button size="sm" className="ml-3 bg-blue-600 hover:bg-blue-700" onClick={() => (window.location.href = '/settings')}>
+              Settings'e git
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Enhanced KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpiData.map((kpi, index) => {
@@ -350,7 +432,7 @@ export default function Dashboard() {
                 </div>
                 <h4 className="text-slate-400 text-sm mb-2">{kpi.title}</h4>
                 <p className="text-2xl font-bold text-white mb-1">{kpi.value}</p>
-                {compareEnabled && (
+                {compareEnabled && kpi.previousValue && (
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-slate-500">{t('previous')}: {kpi.previousValue}</span>
                     <div className="flex items-center gap-1">
@@ -371,13 +453,13 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* Enhanced Charts */}
+      {/* Enhanced Charts (Sessions/New Users) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              {t('revenueTrend')}
+              Sessions Trend
               {compareEnabled && (
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {t('comparative')}
@@ -400,16 +482,7 @@ export default function Dashboard() {
                       color: '#F3F4F6'
                     }} 
                   />
-                  <Area type="monotone" dataKey="revenue" stroke="#3B82F6" fill="#3B82F680" />
-                  {compareEnabled && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="previousRevenue" 
-                      stroke="#94A3B8" 
-                      strokeDasharray="5 5"
-                      strokeWidth={2}
-                    />
-                  )}
+                  <Area type="monotone" dataKey="primary" stroke="#3B82F6" fill="#3B82F680" />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -420,7 +493,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
-              {t('conversionTrend')}
+              New Users Trend
               {compareEnabled && (
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {t('comparative')}
@@ -443,16 +516,7 @@ export default function Dashboard() {
                       color: '#F3F4F6'
                     }} 
                   />
-                  <Line type="monotone" dataKey="conversions" stroke="#10B981" strokeWidth={3} />
-                  {compareEnabled && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="previousConversions" 
-                      stroke="#94A3B8" 
-                      strokeDasharray="5 5"
-                      strokeWidth={2}
-                    />
-                  )}
+                  <Line type="monotone" dataKey="secondary" stroke="#10B981" strokeWidth={3} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

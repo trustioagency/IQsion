@@ -86,10 +86,17 @@ const httpServer = http.createServer(app);
 // Router'ı Vite middleware'inden ÖNCE ekle ki /api istekleri catch-all tarafından yakalanmasın
 app.use(router);
 
-if (app.get("env") === "development") {
+// In local development we run frontend on a separate Vite dev server (5173).
+// Enable embedded Vite only when explicitly requested via EMBED_VITE=1.
+const EMBED_VITE = process.env.EMBED_VITE === '1';
+if (EMBED_VITE) {
+  log('Embedding Vite dev middleware inside Express (EMBED_VITE=1)');
   setupVite(app, httpServer);
-} else {
+} else if (app.get("env") !== "development") {
+  // Only serve static in production builds
   serveStatic(app);
+} else {
+  log('Vite middleware is disabled in development. Run frontend with: npm run dev');
 }
 
 const PORT = Number(process.env.PORT) || 5001;
