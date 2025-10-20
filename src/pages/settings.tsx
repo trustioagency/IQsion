@@ -73,12 +73,9 @@ export default function Settings() {
     enabled: !!user,
     queryFn: async () => {
       const uid = (user as any)?.uid || (user as any)?.id;
-      const res = await fetch('/api/brand-profile', {
-        credentials: 'include',
-        headers: uid ? { 'x-user-uid': uid } : {},
-      });
+      const res = await apiRequest('GET', `/api/brand-profile?userId=${encodeURIComponent(uid || 'test-user')}`);
       if (!res.ok) return {};
-      return res.json();
+      return await res.json();
     }
   });
 
@@ -87,11 +84,9 @@ export default function Settings() {
     enabled: !!user,
     queryFn: async () => {
       const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
-      const res = await fetch(`/api/connections?userId=${encodeURIComponent(uid)}`, {
-        credentials: 'include',
-      });
+      const res = await apiRequest('GET', `/api/connections?userId=${encodeURIComponent(uid)}`);
       if (!res.ok) return {};
-      return res.json();
+      return await res.json();
     }
   });
 
@@ -101,31 +96,21 @@ export default function Settings() {
     enabled: !!user,
     queryFn: async () => {
       const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
-      const res = await fetch(`/api/analytics/properties?userId=${encodeURIComponent(uid)}`, {
-        credentials: 'include',
-      });
-      if (!res.ok) return { properties: [] };
-      return res.json();
+      const res = await apiRequest('GET', `/api/analytics/properties?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { properties: [] } as any;
+      return await res.json();
     },
   });
 
   const profileMutation = useMutation({
     mutationFn: async (data: BrandProfile) => {
-      const uid = (user as any)?.uid || (user as any)?.id;
-      const response = await fetch('/api/brand-profile', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(uid ? { 'x-user-uid': uid } : {}),
-        },
-        credentials: 'include',
-        body: JSON.stringify(data),
-      });
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const response = await apiRequest('POST', `/api/brand-profile?userId=${encodeURIComponent(uid)}`, data);
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Profile update failed');
       }
-      return response.json();
+      return await response.json();
     },
     onSuccess: () => {
       toast({
@@ -186,7 +171,7 @@ export default function Settings() {
         case 'google_ads':
           authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
-        case 'meta':
+        case 'meta_ads':
           authUrl = `/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_analytics':
@@ -256,7 +241,18 @@ export default function Settings() {
       });
       await resp.json();
       toast({ title: 'Başarılı', description: 'Google Analytics property seçimi kaydedildi' });
+      // Update local cache immediately
+      queryClient.setQueryData(['connections', uid], (prev: any) => ({
+        ...(prev || {}),
+        google_analytics: {
+          ...((prev && prev.google_analytics) || {}),
+          propertyId,
+          isConnected: true,
+        }
+      }));
+      // Make related queries stale so they refetch with new property
       queryClient.invalidateQueries({ queryKey: ['connections'] });
+      queryClient.invalidateQueries({ queryKey: ['ga-summary'] });
     } catch (e) {
       toast({ title: 'Hata', description: 'Property kaydedilemedi', variant: 'destructive' });
     }
@@ -276,7 +272,7 @@ export default function Settings() {
 
   const platformIcons: Record<string, any> = {
     shopify: <Building className="w-5 h-5" />,
-    meta: <Zap className="w-5 h-5" />,
+    meta_ads: <Zap className="w-5 h-5" />,
     google_ads: <Globe className="w-5 h-5" />,
     google_analytics: <Globe className="w-5 h-5" />,
     google_search_console: <Globe className="w-5 h-5" />,
@@ -285,7 +281,7 @@ export default function Settings() {
 
   const platforms = [
     { id: 'shopify', name: 'Shopify', description: 'E-ticaret platformu bağlantısı' },
-    { id: 'meta', name: 'Meta Ads', description: 'Facebook ve Instagram reklamları' },
+    { id: 'meta_ads', name: 'Meta Ads', description: 'Facebook ve Instagram reklamları' },
     { id: 'google_ads', name: 'Google Ads', description: 'Google reklam kampanyaları' },
     { id: 'google_analytics', name: 'Google Analytics', description: 'Website analizi ve trafik verileri' },
     { id: 'google_search_console', name: 'Google Search Console', description: 'Arama motoru optimizasyonu verileri' },
@@ -353,7 +349,12 @@ export default function Settings() {
                                 {/* Google Analytics property seçimi */}
                                 {platform.id === 'google_analytics' && isConnected && (
                                   <div className="mt-2">
-                                    <label className="block text-xs text-slate-400 mb-1">Property</label>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs text-slate-400">Property</label>
+                                      {connection?.propertyId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {connection.propertyId}</span>
+                                      )}
+                                    </div>
                                     <Select
                                       value={connection?.propertyId || ''}
                                       onValueChange={(value) => handleSaveGoogleAnalyticsProperty(value)}
