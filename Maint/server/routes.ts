@@ -806,6 +806,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       res.status(500).json({ message: 'Bağlantı güncellenemedi', error });
     }
   });
+      // 1) Detailed by date (for charts)
       const response = await fetchWithTimeout(
         `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
         {
@@ -819,11 +820,54 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
         10000
       );
       if (response.ok) {
-        const data = await response.json();
-        // Cache yaz
-        await admin.database().ref(cacheKey).set({ data, cachedAt: Date.now() });
+        const detailedData = await response.json();
+
+        // 2) Overall totals without dimensions (for accurate KPIs)
+        const overallReqBody = {
+          dateRanges: [{ startDate, endDate }],
+          metrics: [
+            { name: 'sessions' },
+            { name: 'newUsers' },
+            { name: 'activeUsers' },
+            { name: 'averageSessionDuration' },
+            { name: 'eventCount' },
+          ],
+        } as any;
+        let totals: any = undefined;
+        try {
+          const overallResp = await fetchWithTimeout(
+            `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(overallReqBody),
+            },
+            10000
+          );
+          if (overallResp.ok) {
+            const overallData = await overallResp.json();
+            const mHeaders = (overallData.metricHeaders || []).map((m: any) => m.name);
+            const firstRow = (overallData.rows || [])[0];
+            if (firstRow && firstRow.metricValues) {
+              totals = {} as any;
+              for (let i = 0; i < mHeaders.length; i++) {
+                const name = mHeaders[i];
+                const val = Number(firstRow.metricValues[i]?.value || '0');
+                totals[name] = Number.isFinite(val) ? val : 0;
+              }
+            }
+          }
+        } catch (_) {
+          // totals alınamazsa yoksay
+        }
+
+        const combined = { ...detailedData, totals };
+        await admin.database().ref(cacheKey).set({ data: combined, cachedAt: Date.now() });
         res.setHeader('X-Cache', 'MISS');
-        res.json(data);
+        res.json(combined);
       } else {
         const errorData = await response.text();
         res.status(500).json({ message: 'Veri çekilemedi', error: errorData });

@@ -164,9 +164,10 @@ export default function Dashboard() {
     return `${m}:${ss.toString().padStart(2, '0')}`;
   };
 
-  // Build KPI data from GA rows
+  // Build KPI data using backend totals when available (matches GA UI), fallback to summing rows
   const kpiData = useMemo(() => {
-    if (!gaSummary?.rows?.length) {
+    const totals = (gaSummary as any)?.totals as (Record<string, number> | undefined);
+    if (!gaSummary?.rows?.length && !totals) {
       return [
         { title: 'Sessions', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
         { title: 'New Users', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
@@ -174,20 +175,31 @@ export default function Dashboard() {
         { title: 'Avg. Session Duration', value: '-', previousValue: '-', change: '-', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
       ];
     }
-    const total = gaSummary.rows.reduce((acc, r) => {
-      acc.sessions += r.sessions;
-      acc.newUsers += r.newUsers;
-      acc.activeUsers += r.activeUsers;
-      acc.eventCount += r.eventCount;
-      acc.durationSum += r.averageSessionDuration;
-      acc.durationCount += 1;
-      return acc;
-    }, { sessions: 0, newUsers: 0, activeUsers: 0, eventCount: 0, durationSum: 0, durationCount: 0 });
-    const avgDuration = total.durationCount ? total.durationSum / total.durationCount : 0;
+    let totalsCalc = totals;
+    if (!totalsCalc) {
+      const safeRows = (gaSummary?.rows || []);
+      const sum = safeRows.reduce((acc, r) => {
+        acc.sessions += r.sessions;
+        acc.newUsers += r.newUsers;
+        acc.activeUsers += r.activeUsers;
+        acc.eventCount += r.eventCount;
+        acc.durationSum += r.averageSessionDuration;
+        acc.durationCount += 1;
+        return acc;
+      }, { sessions: 0, newUsers: 0, activeUsers: 0, eventCount: 0, durationSum: 0, durationCount: 0 } as any);
+      totalsCalc = {
+        sessions: sum.sessions,
+        newUsers: sum.newUsers,
+        activeUsers: sum.activeUsers,
+        eventCount: sum.eventCount,
+        averageSessionDuration: sum.durationCount ? sum.durationSum / sum.durationCount : 0,
+      } as any;
+    }
+    const avgDuration = (totalsCalc as any).averageSessionDuration || 0;
     return [
-      { title: 'Sessions', value: fmtNumber(total.sessions), previousValue: '', change: '', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
-      { title: 'New Users', value: fmtNumber(total.newUsers), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
-      { title: 'Active Users', value: fmtNumber(total.activeUsers), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+      { title: 'Sessions', value: fmtNumber((totalsCalc as any).sessions || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
+      { title: 'New Users', value: fmtNumber((totalsCalc as any).newUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+      { title: 'Active Users', value: fmtNumber((totalsCalc as any).activeUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
       { title: 'Avg. Session Duration', value: fmtDuration(avgDuration), previousValue: '', change: '', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
     ];
   }, [gaSummary]);

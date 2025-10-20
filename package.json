@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "dev:all": "concurrently -k -n FRONT,API -c green,cyan \"npm run dev\" \"npm --prefix Maint run dev\""
   },
   "dependencies": {
