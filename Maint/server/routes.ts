@@ -732,9 +732,10 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           return res.status(500).json({ message: 'Google Analytics accessToken yenileme hatası.', error: err });
         }
       }
-      const propertyId = req.query.propertyId || 'YOUR_GA4_PROPERTY_ID';
-      let startDate = req.query.startDate;
-      let endDate = req.query.endDate;
+  const propertyId = req.query.propertyId || 'YOUR_GA4_PROPERTY_ID';
+  let startDate = req.query.startDate;
+  let endDate = req.query.endDate;
+  const channel = typeof req.query.channel === 'string' ? req.query.channel : undefined;
       if (!startDate || !endDate) {
         startDate = '7daysAgo';
         endDate = 'today';
@@ -749,6 +750,36 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
         res.setHeader('X-Cache', 'HIT');
         return res.json(cached.data);
       }
+      // Optional channel filter mapping
+      let dimensionFilter: any = undefined;
+      if (channel && channel !== 'all') {
+        // Prefer sessionSource for platform-specific filters; use default channel grouping for organic/email
+        const bySource: Record<string, string> = {
+          google: 'google',
+          meta: 'facebook', // note: could also be 'instagram'
+          tiktok: 'tiktok',
+        };
+        const byGrouping: Record<string, string> = {
+          email: 'Email',
+          organic: 'Organic Search',
+        };
+        if (bySource[channel]) {
+          dimensionFilter = {
+            filter: {
+              fieldName: 'sessionSource',
+              stringFilter: { matchType: 'EXACT', value: bySource[channel] },
+            }
+          };
+        } else if (byGrouping[channel]) {
+          dimensionFilter = {
+            filter: {
+              fieldName: 'sessionDefaultChannelGrouping',
+              stringFilter: { matchType: 'EXACT', value: byGrouping[channel] },
+            }
+          };
+        }
+      }
+
       const requestBody = {
         dateRanges: [{ startDate, endDate }],
         metrics: [
@@ -759,6 +790,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           { name: 'eventCount' }
         ],
         dimensions: [{ name: 'date' }],
+        ...(dimensionFilter ? { dimensionFilter } : {}),
       };
   // Platform bağlantılarını güncelleyen endpoint (adAccountId/propertyId kaydetme)
   router.post('/api/connections', async (req, res) => {
@@ -832,6 +864,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
             { name: 'averageSessionDuration' },
             { name: 'eventCount' },
           ],
+          ...(dimensionFilter ? { dimensionFilter } : {}),
         } as any;
         let totals: any = undefined;
         try {
@@ -864,7 +897,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           // totals alınamazsa yoksay
         }
 
-        const combined = { ...detailedData, totals };
+  const combined = { ...detailedData, totals, requestedRange: { startDate, endDate }, channelApplied: channel || 'all' };
         await admin.database().ref(cacheKey).set({ data: combined, cachedAt: Date.now() });
         res.setHeader('X-Cache', 'MISS');
         res.json(combined);

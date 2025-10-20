@@ -99,7 +99,7 @@ export default function Dashboard() {
 
   // 2) Fetch GA summary if property selected
   const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
-    queryKey: ['ga-summary', uid, selectedGaPropertyId, dateRange],
+    queryKey: ['ga-summary', uid, selectedGaPropertyId, dateRange, selectedChannel],
     enabled: !!user && !!selectedGaPropertyId,
     queryFn: async () => {
       const { startDate, endDate } = makeGaRange(dateRange);
@@ -108,6 +108,9 @@ export default function Dashboard() {
       url.searchParams.set('propertyId', selectedGaPropertyId!);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
+      if (selectedChannel && selectedChannel !== 'all') {
+        url.searchParams.set('channel', selectedChannel);
+      }
       const res = await fetch(url.toString(), { credentials: 'include' });
       if (!res.ok) return null;
       const json = await res.json();
@@ -197,10 +200,10 @@ export default function Dashboard() {
     }
     const avgDuration = (totalsCalc as any).averageSessionDuration || 0;
     return [
-      { title: 'Sessions', value: fmtNumber((totalsCalc as any).sessions || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
-      { title: 'New Users', value: fmtNumber((totalsCalc as any).newUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
-      { title: 'Active Users', value: fmtNumber((totalsCalc as any).activeUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
-      { title: 'Avg. Session Duration', value: fmtDuration(avgDuration), previousValue: '', change: '', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+      { title: 'sessions', value: fmtNumber((totalsCalc as any).sessions || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
+      { title: 'newUsers', value: fmtNumber((totalsCalc as any).newUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+      { title: 'activeUsers', value: fmtNumber((totalsCalc as any).activeUsers || 0), previousValue: '', change: '', changeType: 'positive' as const, icon: Users, color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+      { title: 'averageSessionDuration', value: fmtDuration(avgDuration), previousValue: '', change: '', changeType: 'positive' as const, icon: ClockIcon, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
     ];
   }, [gaSummary]);
 
@@ -325,7 +328,7 @@ export default function Dashboard() {
       </div>
 
       {/* Enhanced Controls Section */}
-      <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between">
   <h1 className="text-2xl font-bold text-white">{t('genelBakış')}</h1>
         <div className="flex items-center gap-4">
           {/* Channel Selector */}
@@ -415,6 +418,13 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Applied range info */}
+      {gaSummary && (gaSummary as any).requestedRange && (
+        <div className="text-xs text-slate-400 -mt-4">
+          Range: {(gaSummary as any).requestedRange.startDate} → {(gaSummary as any).requestedRange.endDate} | Channel: {(gaSummary as any).channelApplied}
+        </div>
+      )}
+
       {/* If GA not connected, show quick CTA */}
       {!gaConnected && (
         <Card className="bg-amber-500/10 border-amber-500/30">
@@ -471,7 +481,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              Sessions Trend
+              sessions
               {compareEnabled && (
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {t('comparative')}
@@ -505,7 +515,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
-              New Users Trend
+              newUsers
               {compareEnabled && (
                 <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
                   {t('comparative')}
