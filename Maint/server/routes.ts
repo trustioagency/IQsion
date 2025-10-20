@@ -738,7 +738,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   const channel = typeof req.query.channel === 'string' ? req.query.channel : undefined;
       if (!startDate || !endDate) {
         startDate = '7daysAgo';
-        endDate = 'today';
+        endDate = 'yesterday';
       }
       // Basit cache: 2 dakika
       const cacheKey = `cache/ga/summary/${userId}/${propertyId}/${startDate}-${endDate}`;

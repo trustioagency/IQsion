@@ -70,13 +70,13 @@ export default function Dashboard() {
   const makeGaRange = (key: DateRangeKey) => {
     switch (key) {
       case '7d':
-        return { startDate: '7daysAgo', endDate: 'today' };
+        return { startDate: '7daysAgo', endDate: 'yesterday' };
       case '30d':
-        return { startDate: '30daysAgo', endDate: 'today' };
+        return { startDate: '30daysAgo', endDate: 'yesterday' };
       case '90d':
-        return { startDate: '90daysAgo', endDate: 'today' };
+        return { startDate: '90daysAgo', endDate: 'yesterday' };
       default:
-        return { startDate: '7daysAgo', endDate: 'today' };
+        return { startDate: '7daysAgo', endDate: 'yesterday' };
     }
   };
 
