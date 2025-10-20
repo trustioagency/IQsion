@@ -50,6 +50,7 @@ export default function Settings() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [profileData, setProfileData] = useState<BrandProfile>({} as BrandProfile);
+  const [selectedGaPropertyId, setSelectedGaPropertyId] = useState<string>('');
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -89,6 +90,14 @@ export default function Settings() {
       return await res.json();
     }
   });
+
+  // Sync local GA property state when connections load/update
+  useEffect(() => {
+    const conn = (connections as any)?.google_analytics;
+    if (conn && typeof conn.propertyId === 'string') {
+      setSelectedGaPropertyId(conn.propertyId);
+    }
+  }, [connections]);
 
   // Google Analytics properties listesi
   const { data: gaProperties, isLoading: gaPropsLoading } = useQuery({
@@ -351,13 +360,16 @@ export default function Settings() {
                                   <div className="mt-2">
                                     <div className="flex items-center justify-between mb-1">
                                       <label className="block text-xs text-slate-400">Property</label>
-                                      {connection?.propertyId && (
-                                        <span className="text-[10px] text-slate-500">Seçili: {connection.propertyId}</span>
+                                      {selectedGaPropertyId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {selectedGaPropertyId}</span>
                                       )}
                                     </div>
                                     <Select
-                                      value={connection?.propertyId || ''}
-                                      onValueChange={(value) => handleSaveGoogleAnalyticsProperty(value)}
+                                      value={selectedGaPropertyId || ''}
+                                      onValueChange={(value) => {
+                                        setSelectedGaPropertyId(value);
+                                        handleSaveGoogleAnalyticsProperty(value);
+                                      }}
                                     >
                                       <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
                                         <SelectValue placeholder={gaPropsLoading ? 'Yükleniyor…' : 'Property seç'} />
