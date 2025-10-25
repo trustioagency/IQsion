@@ -2,6 +2,7 @@
 import express from "express";
 import admin from "./firebase";
 import axios from "axios";
+import { GoogleAdsApi } from 'google-ads-api';
 // Basit fetch timeout helper
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -317,37 +318,88 @@ router.get('/api/googleads/accounts', async (req, res) => {
     if (!googleAdsConn || !googleAdsConn.accessToken) {
       return res.status(400).json({ message: 'Google Ads bağlantısı yok veya access token bulunamadı.' });
     }
-    const accessToken = googleAdsConn.accessToken;
-    const apiUrl = 'https://googleads.googleapis.com/v14/customers:listAccessibleCustomers';
-    let apiRes;
-    try {
-      apiRes = await fetch('https://googleads.googleapis.com/v14/customers:listAccessibleCustomers', {
+    const accessToken = googleAdsConn.accessToken as string;
+    const refreshToken = googleAdsConn.refreshToken as string | undefined;
+    const loginCustomerId = (googleAdsConn.loginCustomerId || '') as string;
+    const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '';
+    const client = new GoogleAdsApi({
+      client_id: process.env.GOOGLE_ADS_CLIENT_ID || '',
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET || '',
+      developer_token: developerToken,
+    });
+
+    // 1) If MCC (loginCustomerId) is provided, prefer GAQL to fetch sub-accounts with names
+    if (loginCustomerId && refreshToken) {
+      try {
+        const anyClient: any = client as any;
+        const customer = anyClient.Customer ? anyClient.Customer({ customer_id: loginCustomerId, refresh_token: refreshToken, login_customer_id: loginCustomerId }) : null;
+        if (customer && customer.query) {
+          const gaql = `SELECT customer_client.id, customer_client.descriptive_name, customer_client.status FROM customer_client WHERE customer_client.manager = false`;
+          const rows = await customer.query(gaql);
+          const accounts = (rows || []).map((r: any) => ({ id: r.customer_client?.id?.toString?.() || '', displayName: r.customer_client?.descriptive_name || '' }));
+          if (accounts.length) return res.json({ accounts });
+        }
+      } catch (e) {
+        console.warn('[GoogleAds SDK] MCC subaccount query failed:', e);
+      }
+    }
+
+    // 2) Otherwise, use REST to list accessible customers (ids), then enrich displayName via a tiny GAQL per id
+    const tryList = async (version: string) => {
+      const url = `https://googleads.googleapis.com/${version}/customers:listAccessibleCustomers`;
+      const r = await fetch(url, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+          Authorization: `Bearer ${accessToken}`,
+          'developer-token': developerToken,
         },
       });
-    } catch (apiErr) {
-      return res.status(500).json({ message: 'Google Ads API bağlantı hatası', error: String(apiErr) });
-    }
-    const status = apiRes.status;
-    const text = await apiRes.text();
-    console.log('[GoogleAds DEBUG] API response status:', status);
-    console.log('[GoogleAds DEBUG] API response body:', text);
-    if (status !== 200) {
-      return res.status(status).json({ message: 'Google Ads API hata', status, raw: text });
-    }
-    let data;
+      if (!r.ok) {
+        const txt = await r.text();
+        throw new Error(`listAccessibleCustomers ${version} failed: ${r.status} ${txt}`);
+      }
+      return (await r.json()) as { resourceNames?: string[] };
+    };
+
+    let resourceNames: string[] = [];
     try {
-      data = JSON.parse(text);
+      // Prefer v17, fallback to v18 if needed
+      const j17 = await tryList('v17');
+      resourceNames = j17.resourceNames || [];
+      if (!resourceNames.length) {
+        try {
+          const j18 = await tryList('v18');
+          resourceNames = j18.resourceNames || [];
+        } catch (_) {}
+      }
     } catch (e) {
-      return res.status(500).json({ message: 'Google Ads API JSON parse hatası', error: String(e), raw: text });
+      console.warn('[GoogleAds REST] listAccessibleCustomers failed:', e);
     }
-    const accounts = (data.resourceNames || []).map((name: string) => {
-      const id = name.split('/')[1];
-      return { id, name };
-    });
+
+    // If nothing accessible, return empty array (UI will allow manual entry)
+    if (!resourceNames.length) return res.json({ accounts: [] });
+
+    // Enrich with names via GAQL (best-effort)
+    const ids = resourceNames.map((n) => String(n).split('/')[1]).filter(Boolean);
+    const accounts: Array<{ id: string; displayName: string }> = [];
+    for (const id of ids) {
+      let displayName = id;
+      try {
+        if (refreshToken) {
+          const anyClient: any = client as any;
+          const self = anyClient.Customer ? anyClient.Customer({ customer_id: id, refresh_token: refreshToken, login_customer_id: loginCustomerId || undefined }) : null;
+          if (self && self.query) {
+            const row = await self.query('SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1');
+            const name = Array.isArray(row) && row[0]?.customer?.descriptive_name;
+            if (name) displayName = name as string;
+          }
+        }
+      } catch (e) {
+        // ignore per-account errors; keep ID as displayName
+      }
+      accounts.push({ id, displayName });
+    }
+
     res.json({ accounts });
   } catch (err) {
     console.error('[GoogleAds DEBUG] /api/googleads/accounts error:', err);
@@ -380,11 +432,17 @@ router.get('/api/shopify/data', async (req: express.Request, res: express.Respon
 // Google Ads OAuth bağlantı endpointi
 router.get('/api/auth/googleads/connect', async (req: express.Request, res: express.Response) => {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
-  const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI;
+  // Normalize host and compute redirect dynamically to avoid port mismatches (e.g., 5000 vs 5001)
+  const rawHost = req.get('host') || 'localhost:5001';
+  const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+  const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/googleads/callback`;
+  const redirectEnv = process.env.GOOGLE_ADS_REDIRECT_URI;
+  const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
   const scope = 'https://www.googleapis.com/auth/adwords';
   const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
   const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri || '')}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${encodeURIComponent(stateRaw)}`;
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${encodeURIComponent(stateRaw)}`;
+  console.log('[GOOGLE ADS CONNECT] redirectUri=', redirectUri, 'state=', stateRaw);
   res.redirect(authUrl);
 });
 
@@ -396,13 +454,18 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   try {
     const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
-    const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI;
+    // Use same normalization logic as in connect
+    const rawHost = req.get('host') || 'localhost:5001';
+    const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+    const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/googleads/callback`;
+    const redirectEnv = process.env.GOOGLE_ADS_REDIRECT_URI;
+    const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
     // Token alma
     const params = new URLSearchParams();
     params.append('code', code);
     params.append('client_id', clientId || '');
     params.append('client_secret', clientSecret || '');
-    params.append('redirect_uri', redirectUri || '');
+  params.append('redirect_uri', redirectUri || '');
     params.append('grant_type', 'authorization_code');
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -469,11 +532,14 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       // Google Ads reklam hesabı güncelleme
       if (platform === 'google_ads') {
         const accountId = req.body.accountId;
-        if (!accountId) {
-          return res.status(400).json({ message: 'Google Ads reklam hesabı ID eksik.' });
+        const loginCustomerId = req.body.loginCustomerId;
+        if (loginCustomerId) {
+          await admin.database().ref(`platformConnections/${userId}/google_ads/loginCustomerId`).set(loginCustomerId);
         }
-        await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
-        return res.json({ message: 'Google Ads reklam hesabı güncellendi.', accountId });
+        if (accountId) {
+          await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
+        }
+        return res.json({ message: 'Google Ads bağlantısı güncellendi.', accountId, loginCustomerId });
       }
       return res.status(400).json({ message: 'Desteklenmeyen platform.' });
     } catch (error) {

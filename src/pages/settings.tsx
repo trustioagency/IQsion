@@ -115,7 +115,7 @@ export default function Settings() {
   });
 
   // Google Ads accounts list (for selection UI)
-  const { data: googleAdAccounts } = useQuery({
+  const { data: googleAdAccounts, refetch: refetchGoogleAdsAccounts } = useQuery({
     queryKey: ['googleads-accounts', (user as any)?.uid || (user as any)?.id],
     enabled: !!user && !!(connections as any)?.google_ads?.isConnected,
     queryFn: async () => {
@@ -459,6 +459,7 @@ export default function Settings() {
                                         <span className="text-[10px] text-slate-500">Seçili: {(connections as any).google_ads.accountId}</span>
                                       )}
                                     </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
                                     <Select
                                       value={(connections as any)?.google_ads?.accountId || ''}
                                       onValueChange={async (value) => {
@@ -485,17 +486,69 @@ export default function Settings() {
                                       }}
                                     >
                                       <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
-                                        <SelectValue placeholder={!googleAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
+                                        <SelectValue placeholder={!googleAdAccounts ? 'Yükleniyor…' : ((googleAdAccounts?.accounts||[]).length ? 'Hesap seç' : 'Hesap bulunamadı')} />
                                       </SelectTrigger>
                                       <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
                                         {!(googleAdAccounts?.accounts || []).length && (
                                           <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
                                         )}
                                         {(googleAdAccounts?.accounts || []).map((acc: any) => (
-                                          <SelectItem key={acc.id} value={acc.id}>{acc.id}</SelectItem>
+                                          <SelectItem key={acc.id} value={acc.id}>{acc.displayName || acc.id}</SelectItem>
                                         ))}
                                       </SelectContent>
                                     </Select>
+                                    {/* MCC ID entry to enable auto-listing via GAQL */}
+                                    <Input
+                                      placeholder="MCC (Yönetici) ID"
+                                      defaultValue={(connections as any)?.google_ads?.loginCustomerId || ''}
+                                      className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-44"
+                                      onBlur={async (e) => {
+                                        const value = e.target.value.replace(/\D/g, '');
+                                        const uid = (user as any)?.uid || (user as any)?.id;
+                                        try {
+                                          const resp = await apiRequest('POST', '/api/connections', {
+                                            platform: 'google_ads',
+                                            loginCustomerId: value,
+                                            userId: uid,
+                                          });
+                                          await resp.json();
+                                          toast({ title: 'MCC kaydedildi', description: value ? `MCC: ${value}` : 'Boş' });
+                                          refetchGoogleAdsAccounts();
+                                        } catch (_) {}
+                                      }}
+                                    />
+                                    {/* Manual entry fallback */}
+                                    <Input
+                                      placeholder="Müşteri ID gir (xxx-xxx-xxxx)"
+                                      className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-48"
+                                      onKeyDown={async (e) => {
+                                        if (e.key === 'Enter') {
+                                          const value = (e.target as HTMLInputElement).value.replace(/\D/g, '');
+                                          if (!value) return;
+                                          const uid = (user as any)?.uid || (user as any)?.id;
+                                          try {
+                                            const resp = await apiRequest('POST', '/api/connections', {
+                                              platform: 'google_ads',
+                                              accountId: value,
+                                              userId: uid,
+                                            });
+                                            await resp.json();
+                                            toast({ title: 'Kaydedildi', description: `Hesap ${value} seçildi` });
+                                            queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                              ...(prev || {}),
+                                              google_ads: {
+                                                ...((prev && prev.google_ads) || {}),
+                                                accountId: value,
+                                                isConnected: true,
+                                              },
+                                            }));
+                                          } catch (err) {
+                                            toast({ title: 'Hata', description: 'Hesap kaydedilemedi', variant: 'destructive' });
+                                          }
+                                        }
+                                      }}
+                                    />
+                                    </div>
                                   </div>
                                 )}
                                 {/* Meta Ads hesap seçimi */}
