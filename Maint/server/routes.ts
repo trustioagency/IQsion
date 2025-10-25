@@ -429,6 +429,122 @@ router.get('/api/shopify/data', async (req: express.Request, res: express.Respon
   }
 });
 
+// Google Ads özet verisi (hızlı test endpointi)
+router.get('/api/googleads/summary', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
+
+    // Bağlantı bilgileri
+    const snapshot = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
+    const gaConn = snapshot.val();
+    if (!gaConn?.accessToken) {
+      return res.status(400).json({ message: 'Google Ads bağlantısı bulunamadı (token eksik).' });
+    }
+    const refreshToken: string | undefined = gaConn.refreshToken;
+    let accountId: string | undefined = gaConn.accountId;
+    const loginCustomerId: string | undefined = gaConn.loginCustomerId || undefined;
+
+    // Eğer hesap seçili değilse, erişilebilir ilk hesabı bulmayı dene
+    if (!accountId) {
+      try {
+        const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '';
+        const listUrl = `https://googleads.googleapis.com/v17/customers:listAccessibleCustomers`;
+        const r = await fetch(listUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${gaConn.accessToken}`, 'developer-token': devToken },
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const first = (j.resourceNames || [])[0];
+          const id = first ? String(first).split('/')[1] : undefined;
+          if (id) {
+            accountId = id;
+            await admin.database().ref(`platformConnections/${userId}/google_ads`).update({ accountId: id, updatedAt: new Date().toISOString() });
+          }
+        }
+      } catch (_) {}
+    }
+    if (!accountId) {
+      return res.status(400).json({ message: 'Google Ads hesap ID bulunamadı. Ayarlar > Google Ads bölümünden bir hesap seçin.' });
+    }
+
+    // Tarih aralığı (son 7 gün, dünü bitiş olarak al)
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const defaultStart = new Date(yesterday);
+    defaultStart.setDate(yesterday.getDate() - 6);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = startDate || fmt(defaultStart);
+    const until = endDate || fmt(yesterday);
+
+    // GAQL ile günlük metrikleri çek (hesap seviyesi)
+    const client = new GoogleAdsApi({
+      client_id: process.env.GOOGLE_ADS_CLIENT_ID || '',
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET || '',
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+    });
+    const anyClient: any = client as any;
+    const customer = anyClient.Customer ? anyClient.Customer({ customer_id: accountId, refresh_token: refreshToken, login_customer_id: loginCustomerId }) : null;
+    if (!customer || !customer.query) {
+      return res.status(500).json({ message: 'Google Ads SDK başlatılamadı.' });
+    }
+
+    const gaql = `
+      SELECT
+        segments.date,
+        metrics.impressions,
+        metrics.clicks,
+        metrics.cost_micros,
+        metrics.conversions
+      FROM customer
+      WHERE segments.date BETWEEN '${since}' AND '${until}'
+      ORDER BY segments.date
+    `;
+
+    let rows: any[] = [];
+    try {
+      rows = await customer.query(gaql);
+    } catch (e: any) {
+      return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: e?.message || String(e) });
+    }
+
+    // Günlük satırlar + toplamlar
+    const daily = rows.map((r: any) => ({
+      date: r.segments?.date,
+      impressions: Number(r.metrics?.impressions || 0),
+      clicks: Number(r.metrics?.clicks || 0),
+      spend: Number(r.metrics?.cost_micros || 0) / 1_000_000,
+      conversions: Number(r.metrics?.conversions || 0),
+    }));
+
+    const totals = daily.reduce(
+      (acc, d) => {
+        acc.impressions += d.impressions;
+        acc.clicks += d.clicks;
+        acc.spend += d.spend;
+        acc.conversions += d.conversions;
+        return acc;
+      },
+      { impressions: 0, clicks: 0, spend: 0, conversions: 0 }
+    );
+    const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+    const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+
+    return res.json({
+      accountId,
+      requestedRange: { since, until },
+      rows: daily,
+      totals: { ...totals, ctr, cpc },
+    });
+  } catch (err) {
+    console.error('[GoogleAds DEBUG] /api/googleads/summary error:', err);
+    res.status(500).json({ message: 'Google Ads özet verisi alınamadı', error: String(err) });
+  }
+});
+
 // Google Ads OAuth bağlantı endpointi
 router.get('/api/auth/googleads/connect', async (req: express.Request, res: express.Response) => {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
