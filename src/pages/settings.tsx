@@ -69,6 +69,29 @@ export default function Settings() {
     }
   }, [user, authLoading, toast]);
 
+  // OAuth dönüşünde bağlantı durumunu hemen yansıt (UX): /settings?connection=success&platform=meta_ads
+  useEffect(() => {
+    if (!user) return;
+    const uid = (user as any)?.uid || (user as any)?.id;
+    const params = new URLSearchParams(window.location.search);
+    const connection = params.get('connection');
+    const platform = params.get('platform');
+    if (connection === 'success' && platform === 'meta_ads') {
+      queryClient.setQueryData(['connections', uid], (prev: any) => ({
+        ...(prev || {}),
+        meta_ads: {
+          ...((prev && prev.meta_ads) || {}),
+          isConnected: true,
+        },
+      }));
+      // URL'i temizle
+      const url = new URL(window.location.href);
+      url.searchParams.delete('connection');
+      url.searchParams.delete('platform');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [user]);
+
   const { data: brandProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['brand-profile', (user as any)?.uid || (user as any)?.id],
     enabled: !!user,
@@ -87,6 +110,30 @@ export default function Settings() {
       const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
       const res = await apiRequest('GET', `/api/connections?userId=${encodeURIComponent(uid)}`);
       if (!res.ok) return {};
+      return await res.json();
+    }
+  });
+
+  // Google Ads accounts list (for selection UI)
+  const { data: googleAdAccounts } = useQuery({
+    queryKey: ['googleads-accounts', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user && !!(connections as any)?.google_ads?.isConnected,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/googleads/accounts?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { accounts: [] } as any;
+      return await res.json();
+    }
+  });
+
+  // Meta ad accounts list (for selection UI)
+  const { data: metaAdAccounts } = useQuery({
+    queryKey: ['meta-adaccounts', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user && !!(connections as any)?.meta_ads?.isConnected,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/meta/adaccounts?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { data: [] } as any;
       return await res.json();
     }
   });
@@ -240,6 +287,23 @@ export default function Settings() {
     }
   };
 
+  const handleTestMetaConnection = async () => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/meta/adaccounts?userId=${encodeURIComponent(uid)}`);
+      const data = await res.json();
+      if (data && data.data && data.data.length) {
+        toast({ title: 'Meta bağlandı', description: `${data.data.length} hesap bulundu. Örn: ${data.data[0].name || data.data[0].id}` });
+      } else if (data && data.accounts) {
+        toast({ title: 'Meta bağlandı', description: `${data.accounts.length} hesap bulundu.` });
+      } else {
+        toast({ title: 'Bağlantı doğrulanamadı', description: 'Hesaplar alınamadı.' , variant: 'destructive'});
+      }
+    } catch (e: any) {
+      toast({ title: 'Meta bağlantı hatası', description: e?.message || 'Doğrulama başarısız', variant: 'destructive' });
+    }
+  };
+
   const handleSaveGoogleAnalyticsProperty = async (propertyId: string) => {
     try {
       const uid = (user as any)?.uid || (user as any)?.id;
@@ -385,6 +449,104 @@ export default function Settings() {
                                     </Select>
                                   </div>
                                 )}
+
+                                {/* Google Ads hesap seçimi */}
+                                {platform.id === 'google_ads' && isConnected && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                      {(connections as any)?.google_ads?.accountId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).google_ads.accountId}</span>
+                                      )}
+                                    </div>
+                                    <Select
+                                      value={(connections as any)?.google_ads?.accountId || ''}
+                                      onValueChange={async (value) => {
+                                        const uid = (user as any)?.uid || (user as any)?.id;
+                                        try {
+                                          const resp = await apiRequest('POST', '/api/connections', {
+                                            platform: 'google_ads',
+                                            accountId: value,
+                                            userId: uid,
+                                          });
+                                          await resp.json();
+                                          toast({ title: 'Başarılı', description: 'Google Ads hesabı güncellendi' });
+                                          queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                            ...(prev || {}),
+                                            google_ads: {
+                                              ...((prev && prev.google_ads) || {}),
+                                              accountId: value,
+                                              isConnected: true,
+                                            },
+                                          }));
+                                        } catch (e) {
+                                          toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                        }
+                                      }}
+                                    >
+                                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                        <SelectValue placeholder={!googleAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
+                                      </SelectTrigger>
+                                      <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                        {!(googleAdAccounts?.accounts || []).length && (
+                                          <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                        )}
+                                        {(googleAdAccounts?.accounts || []).map((acc: any) => (
+                                          <SelectItem key={acc.id} value={acc.id}>{acc.id}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                                {/* Meta Ads hesap seçimi */}
+                                {platform.id === 'meta_ads' && isConnected && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                      {(connections as any)?.meta_ads?.accountId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).meta_ads.accountId}</span>
+                                      )}
+                                    </div>
+                                    <Select
+                                      value={(connections as any)?.meta_ads?.accountId || ''}
+                                      onValueChange={async (value) => {
+                                        const uid = (user as any)?.uid || (user as any)?.id;
+                                        try {
+                                          const resp = await apiRequest('POST', '/api/connections', {
+                                            platform: 'meta_ads',
+                                            accountId: value,
+                                            userId: uid,
+                                          });
+                                          await resp.json();
+                                          toast({ title: 'Başarılı', description: 'Meta reklam hesabı güncellendi' });
+                                          // Update local cache immediately
+                                          queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                            ...(prev || {}),
+                                            meta_ads: {
+                                              ...((prev && prev.meta_ads) || {}),
+                                              accountId: value,
+                                              isConnected: true,
+                                            },
+                                          }));
+                                        } catch (e) {
+                                          toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                        }
+                                      }}
+                                    >
+                                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                        <SelectValue placeholder={!metaAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
+                                      </SelectTrigger>
+                                      <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                        {!(metaAdAccounts?.data || []).length && (
+                                          <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                        )}
+                                        {(metaAdAccounts?.data || []).map((acc: any) => (
+                                          <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.id}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -394,6 +556,11 @@ export default function Settings() {
                                     <CheckCircle className="w-3 h-3 mr-1" />
                                     Bağlı
                                   </Badge>
+                                  {platform.id === 'meta_ads' && (
+                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestMetaConnection}>
+                                      Bağlantıyı test et
+                                    </Button>
+                                  )}
                                   <Button 
                                     size="sm" 
                                     variant="outline" 

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -10,7 +10,7 @@ import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
-import AIChatPanel from "../components/ai-chat-panel";
+const AIChatPanel = lazy(() => import("../components/ai-chat-panel"));
 import Header from "../components/layout/header";
 import { useLanguage } from "../contexts/LanguageContext";
 import {
@@ -34,8 +34,19 @@ type GaMetricRow = {
   eventCount: number;
 };
 
+type GaTotals = {
+  sessions?: number;
+  newUsers?: number;
+  activeUsers?: number;
+  averageSessionDuration?: number;
+  eventCount?: number;
+};
+
 type GaSummary = {
   rows: GaMetricRow[];
+  totals?: GaTotals;
+  requestedRange?: { startDate: string; endDate: string };
+  channelApplied?: string;
 };
 
 export default function Dashboard() {
@@ -48,6 +59,24 @@ export default function Dashboard() {
   const [selectedChannel, setSelectedChannel] = useState<ChannelKey>('all');
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('revenue');
   const [timeRange, setTimeRange] = useState('7d');
+  // Meta summary state via React Query when channel is meta
+  type MetaSummary = {
+    rows: Array<{ date: string; spend: number; impressions: number; clicks: number; ctr: number }>;
+    totals: { spend: number; impressions: number; clicks: number; ctr: number; cpc: number };
+    requestedRange: { startDate: string; endDate: string };
+  } | null;
+
+  const makeMetaRange = (key: DateRangeKey) => {
+    // Always end yesterday to align with GA
+    const today = new Date();
+    const end = new Date(today);
+    end.setDate(today.getDate() - 1);
+    const start = new Date(end);
+    const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 6;
+    start.setDate(end.getDate() - days);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { startDate: fmt(start), endDate: fmt(end) };
+  };
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -96,6 +125,7 @@ export default function Dashboard() {
   });
 
   const selectedGaPropertyId: string | undefined = (connections as any)?.google_analytics?.propertyId;
+  const metaConnected: boolean = !!(connections as any)?.meta_ads?.isConnected;
 
   // 2) Fetch GA summary if property selected
   const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
@@ -135,18 +165,59 @@ export default function Dashboard() {
           eventCount: get('eventCount'),
         } as GaMetricRow;
       });
-      return { rows };
+      // Carry through backend totals (dimensionless, correct for non-additive metrics like activeUsers)
+      const totals: GaTotals | undefined = json.totals;
+      const requestedRange = json.requestedRange;
+      const channelApplied = json.channelApplied;
+      return { rows, totals, requestedRange, channelApplied } as GaSummary;
     }
   });
 
-  // Channel options
-  const channelOptions = [
-    { value: 'all', label: t('allChannels'), color: 'bg-blue-500' },
-    { value: 'google', label: 'Google Ads', color: 'bg-green-500' },
-    { value: 'meta', label: 'Meta Ads', color: 'bg-blue-600' },
-    { value: 'tiktok', label: 'TikTok Ads', color: 'bg-pink-500' },
-    { value: 'email', label: 'Email Marketing', color: 'bg-purple-500' },
-    { value: 'organic', label: language === 'tr' ? 'Organik' : 'Organic', color: 'bg-emerald-500' }
+  // 3) Fetch Meta summary when selected channel is meta and connection exists
+  const { data: metaSummary, isLoading: metaLoading } = useQuery<MetaSummary>({
+    queryKey: ['meta-summary', uid, dateRange],
+    enabled: !!user && metaConnected && selectedChannel === 'meta',
+    queryFn: async () => {
+      const { startDate, endDate } = makeMetaRange(dateRange);
+      const url = new URL('/api/meta/summary', window.location.origin);
+      url.searchParams.set('userId', uid);
+      url.searchParams.set('startDate', startDate);
+      url.searchParams.set('endDate', endDate);
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      if (!res.ok) {
+        // Surface minimal error for UX decisions
+        const text = await res.text();
+        return null as any;
+      }
+      return res.json();
+    }
+  });
+
+  // Channel options grouped by category for a clearer UX in the "Tüm Kanallar" filter
+  const channelGroups: Array<{
+    label: string;
+    items: Array<{ value: ChannelKey; label: string; color?: string }>;
+  }> = [
+    {
+      label: language === 'tr' ? 'Genel' : 'General',
+      items: [{ value: 'all', label: t('allChannels'), color: 'bg-blue-500' }],
+    },
+    {
+      label: language === 'tr' ? 'Reklam Panelleri' : 'Ad Platforms',
+      items: [
+        { value: 'google', label: 'Google Ads', color: 'bg-green-500' },
+        { value: 'meta', label: 'Meta Ads', color: 'bg-blue-600' },
+        { value: 'tiktok', label: 'TikTok Ads', color: 'bg-pink-500' },
+      ],
+    },
+    {
+      label: language === 'tr' ? 'Analitik Kanallar' : 'Analytics Channels',
+      items: [
+        { value: 'organic', label: language === 'tr' ? 'Organik' : 'Organic', color: 'bg-emerald-500' },
+        { value: 'email', label: 'Email', color: 'bg-purple-500' },
+      ],
+    },
+    // Gelecek için yer tutucu: mağaza/site/CRM filtreleri
   ];
 
   // Metric options
@@ -308,7 +379,8 @@ export default function Dashboard() {
 
   const gaConnected = !!selectedGaPropertyId;
 
-  if (authLoading || (isLoading && gaConnected)) {
+  const effectiveLoading = authLoading || (selectedChannel === 'meta' ? (metaConnected && metaLoading) : (gaConnected && isLoading));
+  if (effectiveLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-white text-lg">Loading...</div>
@@ -322,16 +394,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* AI Assistant Bar - Improved Design */}
+      {/* AI Assistant Bar - Lazy loaded to improve first paint */}
       <div className="w-full">
-        <AIChatPanel pageContext="dashboard" />
+        <Suspense fallback={null}>
+          <AIChatPanel pageContext="dashboard" />
+        </Suspense>
       </div>
 
+
       {/* Enhanced Controls Section */}
-    <div className="flex items-center justify-between">
-  <h1 className="text-2xl font-bold text-white">{t('genelBakış')}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">{t('genelBakış')}</h1>
         <div className="flex items-center gap-4">
-          {/* Channel Selector */}
+          {/* Channel Selector (Tüm Kanallar) */}
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-slate-400" />
             <Select value={selectedChannel} onValueChange={(value: ChannelKey) => setSelectedChannel(value)}>
@@ -339,13 +414,19 @@ export default function Dashboard() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-600">
-                {channelOptions.map((channel) => (
-                  <SelectItem key={channel.value} value={channel.value}>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${channel.color}`}></div>
-                      {channel.label}
-                    </div>
-                  </SelectItem>
+                {channelGroups.map((group, gi) => (
+                  <div key={group.label} className="py-1">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500 px-2 pb-1">{group.label}</div>
+                    {group.items.map((channel) => (
+                      <SelectItem key={`${group.label}-${channel.value}`} value={channel.value}>
+                        <div className="flex items-center gap-2">
+                          {channel.color && <div className={`w-3 h-3 rounded-full ${channel.color}`}></div>}
+                          {channel.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {gi < channelGroups.length - 1 && <div className="h-px bg-slate-700 my-1" />}
+                  </div>
                 ))}
               </SelectContent>
             </Select>
@@ -392,8 +473,8 @@ export default function Dashboard() {
 
           {/* Compare Toggle */}
           <div className="flex items-center space-x-2 bg-slate-800 rounded-lg p-2 border border-slate-600">
-            <Switch 
-              id="compare-mode" 
+            <Switch
+              id="compare-mode"
               checked={compareEnabled}
               onCheckedChange={setCompareEnabled}
             />
@@ -419,14 +500,32 @@ export default function Dashboard() {
       </div>
 
       {/* Applied range info */}
-      {gaSummary && (gaSummary as any).requestedRange && (
+      {selectedChannel === 'meta' && metaSummary && metaSummary.requestedRange ? (
         <div className="text-xs text-slate-400 -mt-4">
-          Range: {(gaSummary as any).requestedRange.startDate} → {(gaSummary as any).requestedRange.endDate} | Channel: {(gaSummary as any).channelApplied}
+          Range: {metaSummary.requestedRange.startDate} → {metaSummary.requestedRange.endDate} | Channel: meta
         </div>
+      ) : (gaSummary && gaSummary.requestedRange ? (
+        <div className="text-xs text-slate-400 -mt-4">
+          Range: {gaSummary.requestedRange.startDate} → {gaSummary.requestedRange.endDate} | Channel: {gaSummary.channelApplied}
+        </div>
+      ) : null)}
+
+      {/* Meta error / empty-state helpers */}
+      {selectedChannel === 'meta' && metaConnected && !metaLoading && !metaSummary && (
+        <Card className="bg-amber-500/10 border-amber-500/30">
+          <CardContent className="p-4 text-amber-200 flex items-center justify-between">
+            <div>
+              Meta verisi alınamadı. Lütfen Ayarlar'da Meta bağlantınızı yenileyin ve bir reklam hesabı seçin.
+            </div>
+            <Button size="sm" className="ml-3 bg-blue-600 hover:bg-blue-700" onClick={() => (window.location.href = '/settings')}>
+              Settings'e git
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {/* If GA not connected, show quick CTA */}
-      {!gaConnected && (
+      {!gaConnected && selectedChannel !== 'meta' && (
         <Card className="bg-amber-500/10 border-amber-500/30">
           <CardContent className="p-4 text-amber-200">
             Google Analytics bağlantısı veya property seçimi bulunamadı. Lütfen Settings sayfasından bağlayın ve property seçin.
@@ -438,6 +537,35 @@ export default function Dashboard() {
       )}
 
       {/* Enhanced KPI Cards */}
+      {selectedChannel === 'meta' && metaConnected ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Meta-specific KPIs: Spend, Impressions, Clicks, CTR */}
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('spend')}</h4>
+              <p className="text-2xl font-bold text-white">₺{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(metaSummary?.totals?.spend || 0)}</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('impressions')}</h4>
+              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.impressions || 0)}</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('clicks')}</h4>
+              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.clicks || 0)}</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('ctr')}</h4>
+              <p className="text-2xl font-bold text-white">{((metaSummary?.totals?.ctr || 0)).toFixed(2)}%</p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpiData.map((kpi, index) => {
           const Icon = kpi.icon;
@@ -474,9 +602,61 @@ export default function Dashboard() {
           );
         })}
       </div>
+      )}
 
-      {/* Enhanced Charts (Sessions/New Users) */}
+      {/* Charts: switch to Meta daily Spend/Clicks when meta selected */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {selectedChannel === 'meta' && metaConnected ? (
+          <>
+            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  {t('spend')} / {t('clicks')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={(metaSummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', spend: r.spend, clicks: r.clicks }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="date" stroke="#9CA3AF" />
+                      <YAxis yAxisId="left" stroke="#9CA3AF" />
+                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
+                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
+                      <Bar yAxisId="left" dataKey="spend" fill="#3B82F6" />
+                      <Line yAxisId="right" type="monotone" dataKey="clicks" stroke="#10B981" strokeWidth={3} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  {t('impressions')} / {t('ctr')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={(metaSummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', impressions: r.impressions, ctr: r.ctr }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="date" stroke="#9CA3AF" />
+                      <YAxis yAxisId="left" stroke="#9CA3AF" />
+                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
+                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
+                      <Bar yAxisId="left" dataKey="impressions" fill="#6366F1" />
+                      <Line yAxisId="right" type="monotone" dataKey="ctr" stroke="#F59E0B" strokeWidth={3} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <>
         <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
@@ -544,6 +724,8 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
       </div>
 
       {/* Two Column Layout */}
@@ -658,76 +840,6 @@ export default function Dashboard() {
                               <Play className="w-3 h-3 mr-1" />
                               {t('apply')}
                             </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Anomalies */}
-                  <div>
-                    <h4 className="font-semibold text-white mb-4 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" />
-                      {t('anomaliesAndAlerts')}
-                    </h4>
-                    <div className="space-y-3">
-                      {anomalies.map((anomaly, index) => (
-                        <div key={index} className={`p-4 rounded-lg border transition-colors ${
-                          anomaly.severity === 'Yüksek' 
-                            ? 'bg-red-500/10 border-red-500/30 hover:bg-red-500/15' 
-                            : 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/15'
-                        }`}>
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <h5 className="font-medium text-white mb-1">{anomaly.title}</h5>
-                              <p className="text-slate-300 text-sm">{anomaly.description}</p>
-                            </div>
-                            <Badge 
-                              className={`ml-3 ${
-                                anomaly.severity === 'Yüksek' 
-                                  ? 'bg-red-500/20 text-red-400 border-red-500/30' 
-                                  : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                              }`}
-                            >
-                              {anomaly.severity}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-400">{anomaly.timeDetected}</span>
-                            <Button size="sm" variant="outline" className="border-slate-600 text-slate-300 hover:bg-slate-700">
-                              <Eye className="w-3 h-3 mr-1" />
-                              {t('inspect')}
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Automated Actions */}
-                  <div>
-                    <h4 className="font-semibold text-white mb-4 flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4" />
-                      {t('automatedActions')}
-                    </h4>
-                    <div className="space-y-3">
-                      {automatedActions.map((auto, index) => (
-                        <div key={index} className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/15 transition-colors">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <h5 className="font-medium text-white mb-1">{auto.title}</h5>
-                              <p className="text-slate-300 text-sm">{auto.description}</p>
-                            </div>
-                            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 ml-3">
-                              {auto.impact}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-slate-400">{auto.timeExecuted}</span>
-                            <div className="flex items-center gap-2">
-                              <CheckCircle className="w-4 h-4 text-emerald-400" />
-                              <span className="text-xs text-emerald-400">{t('completed')}</span>
-                            </div>
                           </div>
                         </div>
                       ))}

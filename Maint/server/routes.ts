@@ -322,13 +322,11 @@ router.get('/api/googleads/accounts', async (req, res) => {
     let apiRes;
     try {
       apiRes = await fetch('https://googleads.googleapis.com/v14/customers:listAccessibleCustomers', {
-        method: 'POST',
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({})
       });
     } catch (apiErr) {
       return res.status(500).json({ message: 'Google Ads API bağlantı hatası', error: String(apiErr) });
@@ -384,13 +382,16 @@ router.get('/api/auth/googleads/connect', async (req: express.Request, res: expr
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
   const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI;
   const scope = 'https://www.googleapis.com/auth/adwords';
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent`;
+  const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
+  const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri || '')}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${encodeURIComponent(stateRaw)}`;
   res.redirect(authUrl);
 });
 
 // Google Ads OAuth callback endpointi
 router.get('/api/auth/googleads/callback', async (req: express.Request, res: express.Response) => {
   const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
   if (!code) return res.status(400).send('Google OAuth kodu eksik.');
   try {
     const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
@@ -410,8 +411,15 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
     });
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) throw new Error('Token alınamadı');
-    // Firebase'e kaydet
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : 'test-user';
+    // userId: state içinden oku, yoksa query fallback
+    let stateUserId: string | null = null;
+    if (stateParam) {
+      try {
+        const decoded = decodeURIComponent(stateParam);
+        if (decoded.startsWith('uid:')) stateUserId = decoded.split('|')[0].replace('uid:', '');
+      } catch (_) {}
+    }
+    const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
     await admin.database().ref(`platformConnections/${userId}/google_ads`).set({
   accessToken: tokenData.access_token,
   refreshToken: tokenData.refresh_token,
@@ -419,7 +427,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   createdAt: Date.now(),
   isConnected: true,
     });
-  res.send('<script>window.location.replace("http://localhost:5173/settings")</script>');
+  res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=google_ads")</script>');
   } catch (err) {
     res.status(500).send('Google Ads token alma hatası: ' + err);
   }
@@ -608,18 +616,133 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       res.status(500).json({ message: 'Meta reklam verisi çekilemedi', error });
     }
   });
+
+  // Meta (Facebook/Instagram) özet verisi (toplamlar) endpointi
+  router.get('/api/meta/summary', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : undefined;
+      const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : undefined;
+      // Bağlantı bilgilerini çek
+      const snapshot = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
+      const metaData = snapshot.val();
+      const accessToken = metaData?.accessToken || process.env.META_ACCESS_TOKEN;
+      let adAccountId = metaData?.accountId || process.env.META_AD_ACCOUNT_ID || '';
+      if (!accessToken) {
+        return res.status(400).json({ message: 'Meta bağlantısı bulunamadı (token eksik).' });
+      }
+      // Eğer hesap ID yoksa otomatik tespit et ve kalıcı kaydet
+      if (!adAccountId) {
+        try {
+          const accResp = await fetchWithTimeout(`https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name&access_token=${accessToken}`, { method: 'GET' }, 10000);
+          const accJson: any = await accResp.json();
+          const first = accJson?.data?.[0];
+          if (first?.id) {
+            adAccountId = first.id;
+            await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({
+              accountId: first.id,
+              accountName: first.name || null,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch (e) {
+          // yoksay; hesap bulunamazsa aşağıda hata verilecek
+        }
+      }
+      if (!adAccountId) {
+        return res.status(400).json({ message: 'Meta ad account ID bulunamadı. Lütfen Ayarlar > Meta Ads bölümünden bir hesap seçin.' });
+      }
+
+      // Tarih aralığı zorunlu; yoksa son 30 gün (dün dahil) uygula
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const defaultStart = new Date(yesterday);
+      defaultStart.setDate(yesterday.getDate() - 29);
+      const fmt = (d: Date) => d.toISOString().slice(0, 10);
+      const since = startDate || fmt(defaultStart);
+      const until = endDate || fmt(yesterday);
+
+      // 1) Günlük kırılımla verileri çek (grafikler için)
+      // Ads Manager ile hizalanması için: clicks=inline_link_clicks, CTR=CTR(all)
+      const dayFields = ['spend','impressions','inline_link_clicks','ctr','inline_link_click_ctr'].join(',');
+      const dailyUrl = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${dayFields}&level=account&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${accessToken}`;
+      const dayResp = await fetchWithTimeout(dailyUrl, { method: 'GET' }, 20000);
+      const dayJson = await dayResp.json();
+      if (!dayResp.ok || dayJson.error) {
+        return res.status(dayResp.status || 500).json({ message: 'Meta günlük veriler alınamadı', error: dayJson.error || dayJson });
+      }
+
+      const dayMap: Record<string, { spend: number; impressions: number; clicks: number; ctr: number; link_ctr: number; } > = {};
+      for (const r of (dayJson.data || [])) {
+        const d = r.date_start || '';
+        if (!d) continue;
+        dayMap[d] = {
+          spend: Number(r.spend || 0),
+          impressions: Number(r.impressions || 0),
+          // clicks: use link clicks to match CPC column in Ads Manager
+          clicks: Number(r.inline_link_clicks || 0),
+          // ctr: keep CTR(all) from API to avoid rounding mismatch
+          ctr: Number(r.ctr || 0),
+          link_ctr: Number(r.inline_link_click_ctr || 0),
+        };
+      }
+      // Zero-fill missing days for chart continuity
+      const rows: Array<{ date: string; spend: number; impressions: number; clicks: number; ctr: number }> = [];
+      const cursor = new Date(since);
+      const endD = new Date(until);
+      while (cursor <= endD) {
+        const key = cursor.toISOString().slice(0, 10);
+        const v = dayMap[key] || { spend: 0, impressions: 0, clicks: 0, ctr: 0, link_ctr: 0 } as any;
+        rows.push({ date: key, spend: v.spend, impressions: v.impressions, clicks: v.clicks, ctr: v.ctr });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      // 2) Toplamları tek satırda çek (Ads Manager toplamıyla daha uyumlu)
+      const totalFields = ['spend','impressions','inline_link_clicks','ctr'].join(',');
+      const totalUrl = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${totalFields}&level=account&time_range={"since":"${since}","until":"${until}"}&access_token=${accessToken}`;
+      const totResp = await fetchWithTimeout(totalUrl, { method: 'GET' }, 20000);
+      const totJson = await totResp.json();
+      if (!totResp.ok || totJson.error) {
+        return res.status(totResp.status || 500).json({ message: 'Meta toplam veriler alınamadı', error: totJson.error || totJson });
+      }
+      const totalRow = (totJson.data || [])[0] || {};
+      const tSpend = Number(totalRow.spend || 0);
+      const tImpr = Number(totalRow.impressions || 0);
+      const tLinkClicks = Number(totalRow.inline_link_clicks || 0);
+      const tCtrAll = Number(totalRow.ctr || 0);
+      const tCpc = tLinkClicks > 0 ? tSpend / tLinkClicks : 0;
+
+      return res.json({
+        rows,
+        totals: { spend: tSpend, impressions: tImpr, clicks: tLinkClicks, ctr: tCtrAll, cpc: tCpc },
+        requestedRange: { startDate: since, endDate: until }
+      });
+    } catch (error) {
+      console.error('[Meta SUMMARY ERROR]', error);
+      return res.status(500).json({ message: 'Meta özet verisi çekilemedi', error: String(error) });
+    }
+  });
   // Meta Reklam OAuth connect endpoint
   router.get('/api/auth/meta/connect', async (req, res) => {
-  const clientId = process.env.META_APP_ID;
-  console.log('META_APP_ID:', clientId);
-    const redirectUri = process.env.META_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/meta/callback`;
+    const clientId = process.env.META_APP_ID;
+    const rawHost = req.get('host') || 'localhost:5001';
+    const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+    const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/meta/callback`;
+    // Eğer env'de yanlış bir port (örn. 5000) tanımlıysa yine de computed'ı tercih et
+    const redirectEnv = process.env.META_REDIRECT_URI;
+    const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
     const scope = [
+      'ads_read',
       'ads_management',
       'business_management',
       'pages_show_list',
       'pages_read_engagement',
     ].join(',');
-    const state = encodeURIComponent(Math.random().toString(36).substring(2));
+    const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
+    // userId'yi state içinde taşı (google akışındaki gibi)
+    const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+    const state = encodeURIComponent(stateRaw);
     const authUrl =
       `https://www.facebook.com/v19.0/dialog/oauth?` +
       `client_id=${clientId}` +
@@ -627,55 +750,85 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       `&response_type=code` +
       `&scope=${encodeURIComponent(scope)}` +
       `&state=${state}`;
+    console.log('[META CONNECT] redirectUri=', redirectUri, 'state=', stateRaw);
     res.redirect(authUrl);
   });
 
   // Meta Reklam OAuth callback endpoint
   router.get('/api/auth/meta/callback', async (req, res) => {
-    const code = req.query.code;
+    const code = req.query.code as string | undefined;
+    const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
+    let stateUserId: string | null = null;
+    if (stateParam) {
+      try {
+        const decoded = decodeURIComponent(stateParam);
+        if (decoded.startsWith('uid:')) {
+          stateUserId = decoded.split('|')[0].replace('uid:', '');
+        } else {
+          const maybe = JSON.parse(decoded);
+          if (maybe && typeof maybe.uid === 'string') stateUserId = maybe.uid;
+        }
+      } catch (_) {}
+    }
     if (!code) {
-      return res.redirect('/settings?connection=error&platform=meta_ads');
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
     }
     try {
+      const rawHost = req.get('host') || 'localhost:5001';
+      const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+      const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/meta/callback`;
+      const redirectEnv = process.env.META_REDIRECT_URI;
+      const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
       const params = new URLSearchParams();
       params.append('client_id', process.env.META_APP_ID!);
       params.append('client_secret', process.env.META_APP_SECRET!);
-      params.append('redirect_uri', process.env.META_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/meta/callback`);
-      params.append('code', code as string);
+      params.append('redirect_uri', redirectUri);
+      params.append('code', code);
       const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${params.toString()}`);
       const tokenData = await tokenRes.json();
       if (tokenData.error || !tokenData.access_token) {
-        return res.redirect('/settings?connection=error&platform=meta_ads');
+        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
       }
-      const userId = req.query.userId || 'test-user';
-      // Ad account ID'yi Facebook API'dan çek
-      let accountId = null;
-      let accountName = null;
+      // Short-lived token'ı long-lived ile değiştir
+      let accessToken: string = tokenData.access_token;
       try {
-        const accountsRes = await fetch(`https://graph.facebook.com/v19.0/me/adaccounts?access_token=${tokenData.access_token}`);
+        const exchangeUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
+        exchangeUrl.searchParams.set('grant_type', 'fb_exchange_token');
+        exchangeUrl.searchParams.set('client_id', process.env.META_APP_ID || '');
+        exchangeUrl.searchParams.set('client_secret', process.env.META_APP_SECRET || '');
+        exchangeUrl.searchParams.set('fb_exchange_token', accessToken);
+        const longResp = await fetchWithTimeout(exchangeUrl.toString(), { method: 'GET' }, 10000);
+        const longJson: any = await longResp.json();
+        if (longResp.ok && longJson.access_token) {
+          accessToken = longJson.access_token;
+        }
+      } catch (_) {}
+      const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
+      // Ad account ID'yi Facebook API'dan çek
+      let accountId: string | null = null;
+      let accountName: string | null = null;
+      try {
+        const accountsRes = await fetch(`https://graph.facebook.com/v19.0/me/adaccounts?access_token=${accessToken}`);
         const accountsData = await accountsRes.json();
         if (accountsData.data && accountsData.data.length > 0) {
           accountId = accountsData.data[0].id;
           accountName = accountsData.data[0].name || null;
         }
-      } catch (err) {
-        // Ad account ID çekilemezse null bırak
-      }
+      } catch (_) {}
       await admin.database().ref(`platformConnections/${userId}/meta_ads`).set({
         isConnected: true,
         platform: 'meta_ads',
-        accessToken: tokenData.access_token,
+        accessToken,
         accountId,
         accountName,
         lastSyncAt: null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-  return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=meta_ads")</script>');
-  return res.send('<script>window.location.replace("/settings")</script>');
-  return res.send('<script>window.location.replace("http://localhost:5173/settings")</script>');
+      console.log('[META CALLBACK] saved connection for userId=', userId, { accountId, accountName: accountName || undefined });
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=meta_ads")</script>');
     } catch (err) {
-  return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
     }
   });
   // Kullanıcının bağlantı durumlarını döndüren endpoint
@@ -792,52 +945,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
         dimensions: [{ name: 'date' }],
         ...(dimensionFilter ? { dimensionFilter } : {}),
       };
-  // Platform bağlantılarını güncelleyen endpoint (adAccountId/propertyId kaydetme)
-  router.post('/api/connections', async (req, res) => {
-    try {
-      const userId = req.query.userId || req.body.userId || 'test-user';
-      const platform = req.body.platform;
-      if (!platform) {
-        return res.status(400).json({ message: 'Platform belirtilmedi.' });
-      }
-      // Meta Reklam Hesabı güncelleme
-      if (platform === 'meta_ads') {
-        const accountId = req.body.accountId;
-        if (!accountId) {
-          return res.status(400).json({ message: 'Ad Account ID eksik.' });
-        }
-        // Mevcut bağlantı bilgilerini çek
-        const snapshot = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
-        const metaData = snapshot.val() || {};
-        // Sadece accountId güncelle
-        await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({
-          accountId,
-          updatedAt: new Date().toISOString(),
-        });
-        return res.json({ message: 'Meta ad account ID güncellendi.', accountId });
-      }
-      // Google Analytics propertyId güncelleme
-      if (platform === 'google_analytics') {
-        const propertyId = req.body.propertyId;
-        if (!propertyId) {
-          return res.status(400).json({ message: 'Property ID eksik.' });
-        }
-        // Mevcut bağlantı bilgilerini çek
-        const snapshot = await admin.database().ref(`platformConnections/${userId}/google_analytics`).once('value');
-        const gaData = snapshot.val() || {};
-        // Sadece propertyId güncelle
-        await admin.database().ref(`platformConnections/${userId}/google_analytics`).update({
-          propertyId,
-          updatedAt: new Date().toISOString(),
-        });
-        return res.json({ message: 'Google Analytics property ID güncellendi.', propertyId });
-      }
-      return res.status(400).json({ message: 'Desteklenmeyen platform.' });
-    } catch (error) {
-      console.error('Platform bağlantısı güncelleme hatası:', error);
-      res.status(500).json({ message: 'Bağlantı güncellenemedi', error });
-    }
-  });
+      // (Dupe /api/connections kaldırıldı)
       // 1) Detailed by date (for charts)
       const response = await fetchWithTimeout(
         `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,

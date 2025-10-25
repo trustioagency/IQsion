@@ -86,6 +86,12 @@ export const translations = {
     
     // KPI translations
     conversions: "Dönüşümler",
+
+  // Meta widgets
+  spend: "Harcama",
+  impressions: "Gösterimler",
+  clicks: "Tıklamalar",
+  ctr: "CTR",
     
     // Action Center
     todaysInsight: "Bugünün İçgörüsü",
@@ -307,7 +313,7 @@ export const translations = {
     organicTraffic: "Organic Traffic",
     
     // Metrics and KPIs
-  // impressions: "Impressions", // duplicate removed
+    impressions: "Impressions",
     clicks: "Clicks",
     ctr: "CTR",
     cpc: "CPC",
