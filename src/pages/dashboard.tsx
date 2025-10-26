@@ -58,8 +58,7 @@ export default function Dashboard() {
   const [compareDateRange, setCompareDateRange] = useState<DateRangeKey>('30d');
   const [selectedChannel, setSelectedChannel] = useState<ChannelKey>('all');
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('revenue');
-  const [timeRange, setTimeRange] = useState('7d');
-  // Meta summary state via React Query when channel is meta
+
   type MetaSummary = {
     rows: Array<{ date: string; spend: number; impressions: number; clicks: number; ctr: number }>;
     totals: { spend: number; impressions: number; clicks: number; ctr: number; cpc: number };
@@ -67,7 +66,6 @@ export default function Dashboard() {
   } | null;
 
   const makeMetaRange = (key: DateRangeKey) => {
-    // Always end yesterday to align with GA
     const today = new Date();
     const end = new Date(today);
     end.setDate(today.getDate() - 1);
@@ -78,47 +76,32 @@ export default function Dashboard() {
     return { startDate: fmt(start), endDate: fmt(end) };
   };
 
-  // Redirect to login if not authenticated
   useEffect(() => {
     if (!authLoading && !user) {
       const isTestMode = window.location.search.includes('test=true');
       if (!isTestMode) {
-        toast({
-          title: t('loginRequired'), 
-          description: t('pleaseLogin'),
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/?test=true";
-        }, 1000);
+        toast({ title: t('loginRequired'), description: t('pleaseLogin'), variant: 'destructive' });
+        setTimeout(() => { window.location.href = '/?test=true'; }, 1000);
       }
     }
   }, [user, authLoading, toast, t]);
 
-  // Helper: map DateRangeKey to GA date ranges
   const makeGaRange = (key: DateRangeKey) => {
     switch (key) {
-      case '7d':
-        return { startDate: '7daysAgo', endDate: 'yesterday' };
-      case '30d':
-        return { startDate: '30daysAgo', endDate: 'yesterday' };
-      case '90d':
-        return { startDate: '90daysAgo', endDate: 'yesterday' };
-      default:
-        return { startDate: '7daysAgo', endDate: 'yesterday' };
+      case '7d': return { startDate: '7daysAgo', endDate: 'yesterday' };
+      case '30d': return { startDate: '30daysAgo', endDate: 'yesterday' };
+      case '90d': return { startDate: '90daysAgo', endDate: 'yesterday' };
+      default: return { startDate: '7daysAgo', endDate: 'yesterday' };
     }
   };
 
   const uid = (user as any)?.uid || (user as any)?.id;
 
-  // 1) Fetch platform connections to read selected GA propertyId
   const { data: connections } = useQuery({
     queryKey: ['connections', uid],
     enabled: !!user,
     queryFn: async () => {
-      const res = await fetch(`/api/connections?userId=${encodeURIComponent(uid)}`, {
-        credentials: 'include',
-      });
+      const res = await fetch(`/api/connections?userId=${encodeURIComponent(uid)}`, { credentials: 'include' });
       if (!res.ok) return {} as any;
       return res.json();
     }
@@ -128,7 +111,6 @@ export default function Dashboard() {
   const metaConnected: boolean = !!(connections as any)?.meta_ads?.isConnected;
   const shopifyConnected: boolean = !!(connections as any)?.shopify?.isConnected;
 
-  // 2) Fetch GA summary if property selected
   const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
     queryKey: ['ga-summary', uid, selectedGaPropertyId, dateRange, selectedChannel],
     enabled: !!user && !!selectedGaPropertyId,
@@ -139,13 +121,10 @@ export default function Dashboard() {
       url.searchParams.set('propertyId', selectedGaPropertyId!);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
-      if (selectedChannel && selectedChannel !== 'all') {
-        url.searchParams.set('channel', selectedChannel);
-      }
+      if (selectedChannel && selectedChannel !== 'all') url.searchParams.set('channel', selectedChannel);
       const res = await fetch(url.toString(), { credentials: 'include' });
       if (!res.ok) return null;
       const json = await res.json();
-      // Parse GA v1beta runReport response into rows
       const dimIndex = (json.dimensionHeaders || []).findIndex((d: any) => d.name === 'date');
       const mNames = (json.metricHeaders || []).map((m: any) => m.name);
       const rows: GaMetricRow[] = (json.rows || []).map((r: any) => {
@@ -166,15 +145,11 @@ export default function Dashboard() {
           eventCount: get('eventCount'),
         } as GaMetricRow;
       });
-      // Carry through backend totals (dimensionless, correct for non-additive metrics like activeUsers)
       const totals: GaTotals | undefined = json.totals;
-      const requestedRange = json.requestedRange;
-      const channelApplied = json.channelApplied;
-      return { rows, totals, requestedRange, channelApplied } as GaSummary;
+      return { rows, totals, requestedRange: json.requestedRange, channelApplied: json.channelApplied } as GaSummary;
     }
   });
 
-  // 3) Fetch Meta summary when selected channel is meta and connection exists
   const { data: metaSummary, isLoading: metaLoading } = useQuery<MetaSummary>({
     queryKey: ['meta-summary', uid, dateRange],
     enabled: !!user && metaConnected && selectedChannel === 'meta',
@@ -185,16 +160,11 @@ export default function Dashboard() {
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
       const res = await fetch(url.toString(), { credentials: 'include' });
-      if (!res.ok) {
-        // Surface minimal error for UX decisions
-        const text = await res.text();
-        return null as any;
-      }
+      if (!res.ok) return null as any;
       return res.json();
     }
   });
 
-  // 4) Fetch Shopify summary when connection exists (shown under Mağaza section)
   const makeShopifyRange = (key: DateRangeKey) => {
     const today = new Date();
     const end = new Date(today); end.setDate(today.getDate() - 1);
@@ -227,40 +197,20 @@ export default function Dashboard() {
     }
   });
 
-  // Channel options grouped by category for a clearer UX in the "Tüm Kanallar" filter
-  const channelGroups: Array<{
-    label: string;
-    items: Array<{ value: ChannelKey; label: string; color?: string }>;
-  }> = [
-    {
-      label: language === 'tr' ? 'Genel' : 'General',
-      items: [{ value: 'all', label: t('allChannels'), color: 'bg-blue-500' }],
-    },
-    {
-      label: language === 'tr' ? 'Reklam Panelleri' : 'Ad Platforms',
-      items: [
-        { value: 'google', label: 'Google Ads', color: 'bg-green-500' },
-        { value: 'meta', label: 'Meta Ads', color: 'bg-blue-600' },
-        { value: 'tiktok', label: 'TikTok Ads', color: 'bg-pink-500' },
-      ],
-    },
-    {
-      label: language === 'tr' ? 'Analitik Kanallar' : 'Analytics Channels',
-      items: [
-        { value: 'organic', label: language === 'tr' ? 'Organik' : 'Organic', color: 'bg-emerald-500' },
-        { value: 'email', label: 'Email', color: 'bg-purple-500' },
-      ],
-    },
-    {
-      label: language === 'tr' ? 'Mağaza' : 'Store',
-      items: [
-        { value: 'shopify', label: 'Shopify', color: 'bg-green-600' },
-      ],
-    },
-    // Gelecek için yer tutucu: mağaza/site/CRM filtreleri
+  const channelGroups: Array<{ label: string; items: Array<{ value: ChannelKey; label: string; color?: string }>; }> = [
+    { label: language === 'tr' ? 'Genel' : 'General', items: [{ value: 'all', label: t('allChannels'), color: 'bg-blue-500' }] },
+    { label: language === 'tr' ? 'Reklam Panelleri' : 'Ad Platforms', items: [
+      { value: 'google', label: 'Google Ads', color: 'bg-green-500' },
+      { value: 'meta', label: 'Meta Ads', color: 'bg-blue-600' },
+      { value: 'tiktok', label: 'TikTok Ads', color: 'bg-pink-500' },
+    ] },
+    { label: language === 'tr' ? 'Analitik Kanallar' : 'Analytics Channels', items: [
+      { value: 'organic', label: language === 'tr' ? 'Organik' : 'Organic', color: 'bg-emerald-500' },
+      { value: 'email', label: 'Email', color: 'bg-purple-500' },
+    ] },
+    { label: language === 'tr' ? 'Mağaza' : 'Store', items: [ { value: 'shopify', label: 'Shopify', color: 'bg-green-600' } ] },
   ];
 
-  // Metric options
   const metricOptions = [
     { value: 'revenue', label: language === 'tr' ? 'Gelir' : 'Revenue', icon: DollarSign },
     { value: 'roas', label: 'ROAS', icon: Target },
@@ -269,16 +219,9 @@ export default function Dashboard() {
     { value: 'cost', label: language === 'tr' ? 'Maliyet' : 'Cost', icon: BarChart3 }
   ];
 
-  // Helpers to format metrics
   const fmtNumber = (n: number) => new Intl.NumberFormat('tr-TR').format(Math.round(n));
-  const fmtDuration = (s: number) => {
-    if (!s || !Number.isFinite(s)) return '0:00';
-    const m = Math.floor(s / 60);
-    const ss = Math.round(s % 60);
-    return `${m}:${ss.toString().padStart(2, '0')}`;
-  };
+  const fmtDuration = (s: number) => { if (!s || !Number.isFinite(s)) return '0:00'; const m = Math.floor(s / 60); const ss = Math.round(s % 60); return `${m}:${ss.toString().padStart(2, '0')}`; };
 
-  // Build KPI data using backend totals when available (matches GA UI), fallback to summing rows
   const kpiData = useMemo(() => {
     const totals = (gaSummary as any)?.totals as (Record<string, number> | undefined);
     if (!gaSummary?.rows?.length && !totals) {
@@ -292,22 +235,8 @@ export default function Dashboard() {
     let totalsCalc = totals;
     if (!totalsCalc) {
       const safeRows = (gaSummary?.rows || []);
-      const sum = safeRows.reduce((acc, r) => {
-        acc.sessions += r.sessions;
-        acc.newUsers += r.newUsers;
-        acc.activeUsers += r.activeUsers;
-        acc.eventCount += r.eventCount;
-        acc.durationSum += r.averageSessionDuration;
-        acc.durationCount += 1;
-        return acc;
-      }, { sessions: 0, newUsers: 0, activeUsers: 0, eventCount: 0, durationSum: 0, durationCount: 0 } as any);
-      totalsCalc = {
-        sessions: sum.sessions,
-        newUsers: sum.newUsers,
-        activeUsers: sum.activeUsers,
-        eventCount: sum.eventCount,
-        averageSessionDuration: sum.durationCount ? sum.durationSum / sum.durationCount : 0,
-      } as any;
+      const sum = safeRows.reduce((acc, r) => { acc.sessions += r.sessions; acc.newUsers += r.newUsers; acc.activeUsers += r.activeUsers; acc.eventCount += r.eventCount; acc.durationSum += r.averageSessionDuration; acc.durationCount += 1; return acc; }, { sessions: 0, newUsers: 0, activeUsers: 0, eventCount: 0, durationSum: 0, durationCount: 0 } as any);
+      totalsCalc = { sessions: sum.sessions, newUsers: sum.newUsers, activeUsers: sum.activeUsers, eventCount: sum.eventCount, averageSessionDuration: sum.durationCount ? sum.durationSum / sum.durationCount : 0 } as any;
     }
     const avgDuration = (totalsCalc as any).averageSessionDuration || 0;
     return [
@@ -318,106 +247,35 @@ export default function Dashboard() {
     ];
   }, [gaSummary]);
 
-  const chartData = useMemo(() => {
-    if (!gaSummary?.rows?.length) return [] as Array<{ date: string; primary: number; secondary: number }>;
-    const fmtDate = (yyyymmdd: string) => {
-      if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
-      return `${yyyymmdd.slice(6, 8)}.${yyyymmdd.slice(4, 6)}`; // dd.MM
-    };
-    return gaSummary.rows.map(r => ({
-      date: fmtDate(r.date),
-      primary: r.sessions,
-      secondary: r.newUsers,
-    }));
-  }, [gaSummary]);
-
-  const insights = [
-    {
-      type: "opportunity",
-      title: "TikTok Kampanya Fırsatı",
-      description: "TikTok kampanyanızın ROAS değeri %40 artış gösteriyor. Bütçe artırımı ile potansiyel +₺25,000 ek gelir.",
-      priority: "Yüksek",
-      timeAgo: "2 saat önce",
-      impact: "+₺25,000",
-      confidence: "92%"
-    }
-  ];
-
-  const teamTasks = [
-    {
-      id: 1,
-      title: "Meta kampanya optimizasyonu",
-      assignee: "Ahmet K.",
-      priority: "Yüksek",
-      dueDate: "Bugün",
-      status: "progress"
-    },
-    {
-      id: 2,
-      title: "A/B test sonuçları analizi",
-      assignee: "Elif S.",
-      priority: "Orta",
-      dueDate: "Yarın",
-      status: "pending"
-    }
-  ];
-
-  const actionableItems = [
-    {
-      type: "action",
-      title: "Google Ads bütçesini %15 artır",
-      description: "Son 7 günde %23 ROAS artışı. Önerilen günlük bütçe: ₺850",
-      impact: "Yüksek",
-      estimatedReturn: "+₺12,400",
-      status: "suggested"
-    },
-    {
-      type: "action", 
-      title: "Lookalike kitle oluştur",
-      description: "En yüksek LTV müşterilerinden %1 lookalike kitle",
-      impact: "Orta",
-      estimatedReturn: "+₺8,200",
-      status: "suggested"
-    }
-  ];
-
-  const anomalies = [
-    {
-      type: "warning",
-      title: "CPC ani artış",
-      description: "Google Ads CPC son 3 günde %28 arttı",
-      severity: "Orta",
-      affectedCampaigns: 3,
-      timeDetected: "1 saat önce"
-    },
-    {
-      type: "alert",
-      title: "Stok uyarısı",
-      description: "En çok satan 5 üründen 2'si kritik stok seviyesinde",
-      severity: "Yüksek", 
-      affectedProducts: 2,
-      timeDetected: "30 dakika önce"
-    }
-  ];
-
-  const automatedActions = [
-    {
-      title: "Otomatik bid ayarlaması",
-      description: "Düşük performanslı anahtar kelimelerin bidleri %20 azaltıldı",
-      status: "completed",
-      timeExecuted: "45 dakika önce",
-      impact: "₺320 tasarruf"
-    },
-    {
-      title: "Audience genişletmesi",
-      description: "Yüksek performanslı kitlelerde otomatik genişletme aktifleştirildi",
-      status: "completed", 
-      timeExecuted: "2 saat önce",
-      impact: "+15% reach"
-    }
-  ];
+  const insights = [{ type: 'opportunity', title: 'TikTok Kampanya Fırsatı', description: 'TikTok kampanyanızın ROAS değeri %40 artış gösteriyor. Bütçe artırımı ile potansiyel +₺25,000 ek gelir.', priority: 'Yüksek', timeAgo: '2 saat önce', impact: '+₺25,000', confidence: '92%' }];
+  const teamTasks = [ { id: 1, title: 'Meta kampanya optimizasyonu', assignee: 'Ahmet K.', priority: 'Yüksek', dueDate: 'Bugün', status: 'progress' }, { id: 2, title: 'A/B test sonuçları analizi', assignee: 'Elif S.', priority: 'Orta', dueDate: 'Yarın', status: 'pending' } ];
+  const actionableItems = [ { type: 'action', title: 'Google Ads bütçesini %15 artır', description: 'Son 7 günde %23 ROAS artışı. Önerilen günlük bütçe: ₺850', impact: 'Yüksek', estimatedReturn: '+₺12,400', status: 'suggested' }, { type: 'action', title: 'Lookalike kitle oluştur', description: 'En yüksek LTV müşterilerinden %1 lookalike kitle', impact: 'Orta', estimatedReturn: '+₺8,200', status: 'suggested' } ];
+  const automatedActions = [ { title: 'Otomatik bid ayarlaması', description: 'Düşük performanslı anahtar kelimelerin bidleri %20 azaltıldı', status: 'completed', timeExecuted: '45 dakika önce', impact: '₺320 tasarruf' }, { title: 'Audience genişletmesi', description: 'Yüksek performanslı kitlelerde otomatik genişletme aktifleştirildi', status: 'completed', timeExecuted: '2 saat önce', impact: '+15% reach' } ];
 
   const gaConnected = !!selectedGaPropertyId;
+
+  const Spark: React.FC<{ series: number[]; color?: string }> = ({ series, color = '#3B82F6' }) => (
+    <div className="h-10 mt-2">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={(series || []).map((v, i) => ({ i, v }))}>
+          <Line type="monotone" dataKey="v" stroke={color} strokeWidth={2} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+
+  const gaTrend = React.useMemo(() => {
+    const rows = gaSummary?.rows || [];
+    return { sessions: rows.map(r => r.sessions || 0), newUsers: rows.map(r => r.newUsers || 0), activeUsers: rows.map(r => r.activeUsers || 0), avgDuration: rows.map(r => r.averageSessionDuration || 0) };
+  }, [gaSummary]);
+  const metaTrend = React.useMemo(() => {
+    const rows = (metaSummary as any)?.rows || [];
+    return { spend: rows.map((r: any) => r.spend || 0), impressions: rows.map((r: any) => r.impressions || 0), clicks: rows.map((r: any) => r.clicks || 0), ctr: rows.map((r: any) => r.ctr || 0) };
+  }, [metaSummary]);
+  const shopifyTrend = React.useMemo(() => {
+    const rows = (shopifySummary as any)?.rows || [];
+    return { revenue: rows.map((r: any) => r.revenue || 0), orders: rows.map((r: any) => r.orders || 0), aov: rows.map((r: any) => (r.orders > 0 ? r.revenue / r.orders : 0)) };
+  }, [shopifySummary]);
 
   const effectiveLoading = authLoading ||
     (selectedChannel === 'meta' ? (metaConnected && metaLoading)
@@ -443,7 +301,6 @@ export default function Dashboard() {
           <AIChatPanel pageContext="dashboard" />
         </Suspense>
       </div>
-
 
       {/* Enhanced Controls Section */}
       <div className="flex items-center justify-between">
@@ -583,267 +440,111 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Enhanced KPI Cards */}
+      {/* Enhanced KPI Cards with sparklines */}
       {selectedChannel === 'meta' && metaConnected ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Meta-specific KPIs: Spend, Impressions, Clicks, CTR */}
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('spend')}</h4>
-              <p className="text-2xl font-bold text-white">₺{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(metaSummary?.totals?.spend || 0)}</p>
+              <p className="text-xl font-bold text-white">₺{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(metaSummary?.totals?.spend || 0)}</p>
+              <Spark series={metaTrend.spend} color="#3B82F6" />
             </CardContent>
           </Card>
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('impressions')}</h4>
-              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.impressions || 0)}</p>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.impressions || 0)}</p>
+              <Spark series={metaTrend.impressions} color="#6366F1" />
             </CardContent>
           </Card>
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('clicks')}</h4>
-              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.clicks || 0)}</p>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(metaSummary?.totals?.clicks || 0)}</p>
+              <Spark series={metaTrend.clicks} color="#10B981" />
             </CardContent>
           </Card>
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('ctr')}</h4>
-              <p className="text-2xl font-bold text-white">{((metaSummary?.totals?.ctr || 0)).toFixed(2)}%</p>
+              <p className="text-xl font-bold text-white">{((metaSummary?.totals?.ctr || 0)).toFixed(2)}%</p>
+              <Spark series={metaTrend.ctr} color="#F59E0B" />
             </CardContent>
           </Card>
         </div>
       ) : selectedChannel === 'shopify' && shopifyConnected ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('orders')}</h4>
-              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(shopifySummary?.totals?.orders || 0)}</p>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(shopifySummary?.totals?.orders || 0)}</p>
+              <Spark series={shopifyTrend.orders} color="#10B981" />
             </CardContent>
           </Card>
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('revenue')}</h4>
-              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.revenue || 0)}</p>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.revenue || 0)}</p>
+              <Spark series={shopifyTrend.revenue} color="#3B82F6" />
             </CardContent>
           </Card>
           <Card className="bg-slate-800/80 border-slate-700/50">
-            <CardContent className="p-6">
+            <CardContent className="p-4">
               <h4 className="text-slate-400 text-sm mb-2">{t('aov')}</h4>
-              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.aov || 0)}</p>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.aov || 0)}</p>
+              <Spark series={shopifyTrend.aov} color="#F59E0B" />
             </CardContent>
           </Card>
         </div>
       ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {kpiData.map((kpi, index) => {
-          const Icon = kpi.icon;
-          return (
-            <Card key={index} className="bg-slate-800/80 border-slate-700/50 hover:border-slate-600 transition-all cursor-pointer backdrop-blur-sm hover:bg-slate-800/90">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${kpi.bgColor} shadow-lg`}>
-                    <Icon className={`w-6 h-6 ${kpi.color}`} />
-                  </div>
-                  <Badge variant="secondary" className={`${kpi.changeType === 'positive' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
-                    {kpi.change}
-                  </Badge>
-                </div>
-                <h4 className="text-slate-400 text-sm mb-2">{kpi.title}</h4>
-                <p className="text-2xl font-bold text-white mb-1">{kpi.value}</p>
-                {compareEnabled && kpi.previousValue && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500">{t('previous')}: {kpi.previousValue}</span>
-                    <div className="flex items-center gap-1">
-                      {kpi.changeType === 'positive' ? (
-                        <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <ArrowDownRight className="w-3 h-3 text-red-400" />
-                      )}
-                      <span className={kpi.changeType === 'positive' ? 'text-emerald-400' : 'text-red-400'}>
-                        {kpi.change}
-                      </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {kpiData.map((kpi, index) => {
+            const Icon = kpi.icon;
+            // Map KPI title to GA trend + color
+            let series: number[] = [];
+            let stroke = '#3B82F6';
+            if (kpi.title === 'sessions') { series = gaTrend.sessions; stroke = '#3B82F6'; }
+            else if (kpi.title === 'newUsers') { series = gaTrend.newUsers; stroke = '#10B981'; }
+            else if (kpi.title === 'activeUsers') { series = gaTrend.activeUsers; stroke = '#A78BFA'; }
+            else if (kpi.title === 'averageSessionDuration') { series = gaTrend.avgDuration; stroke = '#F59E0B'; }
+            return (
+              <Card key={index} className="bg-slate-800/80 border-slate-700/50 hover:border-slate-600 transition-all cursor-pointer backdrop-blur-sm hover:bg-slate-800/90">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${kpi.bgColor} shadow-lg`}>
+                      <Icon className={`w-6 h-6 ${kpi.color}`} />
                     </div>
+                    <Badge variant="secondary" className={`${kpi.changeType === 'positive' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                      {kpi.change}
+                    </Badge>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                  <h4 className="text-slate-400 text-sm mb-2">{kpi.title}</h4>
+                  <p className="text-xl font-bold text-white mb-1">{kpi.value}</p>
+                  <Spark series={series} color={stroke} />
+                  {compareEnabled && kpi.previousValue && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-slate-500">{t('previous')}: {kpi.previousValue}</span>
+                      <div className="flex items-center gap-1">
+                        {kpi.changeType === 'positive' ? (
+                          <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <ArrowDownRight className="w-3 h-3 text-red-400" />
+                        )}
+                        <span className={kpi.changeType === 'positive' ? 'text-emerald-400' : 'text-red-400'}>
+                          {kpi.change}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       )}
 
-      {/* Shopify KPIs artık kanal filtresi üzerinden gösteriliyor (duplicated block removed) */}
-
-      {/* Charts: switch to Meta daily Spend/Clicks when meta selected */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {selectedChannel === 'meta' && metaConnected ? (
-          <>
-            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  {t('spend')} / {t('clicks')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={(metaSummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', spend: r.spend, clicks: r.clicks }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="date" stroke="#9CA3AF" />
-                      <YAxis yAxisId="left" stroke="#9CA3AF" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
-                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
-                      <Bar yAxisId="left" dataKey="spend" fill="#3B82F6" />
-                      <Line yAxisId="right" type="monotone" dataKey="clicks" stroke="#10B981" strokeWidth={3} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  {t('impressions')} / {t('ctr')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={(metaSummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', impressions: r.impressions, ctr: r.ctr }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="date" stroke="#9CA3AF" />
-                      <YAxis yAxisId="left" stroke="#9CA3AF" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
-                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
-                      <Bar yAxisId="left" dataKey="impressions" fill="#6366F1" />
-                      <Line yAxisId="right" type="monotone" dataKey="ctr" stroke="#F59E0B" strokeWidth={3} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        ) : selectedChannel === 'shopify' && shopifyConnected ? (
-          <>
-            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  {t('revenue')} / {t('orders')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={(shopifySummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', revenue: r.revenue, orders: r.orders }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="date" stroke="#9CA3AF" />
-                      <YAxis yAxisId="left" stroke="#9CA3AF" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
-                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
-                      <Bar yAxisId="left" dataKey="revenue" fill="#3B82F6" />
-                      <Line yAxisId="right" type="monotone" dataKey="orders" stroke="#10B981" strokeWidth={3} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5" />
-                  {t('aov')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={(shopifySummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', aov: (r.orders > 0 ? r.revenue / r.orders : 0) }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="date" stroke="#9CA3AF" />
-                      <YAxis stroke="#9CA3AF" />
-                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
-                      <Line type="monotone" dataKey="aov" stroke="#F59E0B" strokeWidth={3} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        ) : (
-          <>
-        <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <TrendingUp className="w-5 h-5" />
-              sessions
-              {compareEnabled && (
-                <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
-                  {t('comparative')}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1F2937', 
-                      border: '1px solid #374151',
-                      borderRadius: '8px',
-                      color: '#F3F4F6'
-                    }} 
-                  />
-                  <Area type="monotone" dataKey="primary" stroke="#3B82F6" fill="#3B82F680" />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              newUsers
-              {compareEnabled && (
-                <Badge variant="outline" className="text-xs border-slate-600 text-slate-400">
-                  {t('comparative')}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1F2937', 
-                      border: '1px solid #374151',
-                      borderRadius: '8px',
-                      color: '#F3F4F6'
-                    }} 
-                  />
-                  <Line type="monotone" dataKey="secondary" stroke="#10B981" strokeWidth={3} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-        </>
-        )}
-      </div>
+      {/* Büyük grafikler kaldırıldı; her KPI kartı altında mini sparkline gösteriyoruz */}
 
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
