@@ -177,7 +177,8 @@ router.post('/api/auth/login', async (req, res) => {
 router.get('/api/auth/shopify/connect', (req, res) => {
   let storeUrl = (req.query.storeUrl as string) || '';
   const userId = (req.query.userId as string) || 'test-user';
-  const scopes = 'read_orders,read_products,read_customers';
+  // read_all_orders: 60 günden eski siparişleri de okuyabilmek için
+  const scopes = 'read_orders,read_all_orders,read_products,read_customers';
   // Normalize host and compute redirect dynamically to avoid port mismatches in local (e.g., 5000 vs 5001)
   const rawHost = req.get('host') || 'localhost:5001';
   const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
@@ -189,6 +190,15 @@ router.get('/api/auth/shopify/connect', (req, res) => {
   if (!/\.myshopify\.com$/i.test(storeUrl)) {
     storeUrl = `${storeUrl}.myshopify.com`;
   }
+  console.log('[SHOPIFY CONNECT]', {
+    storeUrl,
+    rawHost,
+    normalizedHost,
+    redirectEnv,
+    computedRedirect,
+    usingRedirect: redirectUri,
+    userId,
+  });
   const authUrl = `https://${storeUrl}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(userId)}`;
   res.redirect(authUrl);
 });
@@ -205,12 +215,15 @@ router.get('/api/auth/shopify/callback', async (req, res) => {
       code,
     });
     const accessToken = tokenRes.data.access_token;
-    // Tokenı ve mağaza adresini veritabanına kaydet
-    await admin.database().ref(`platformConnections/${state}/shopify`).set({
+    // Hedef kullanıcı: state (uid) yoksa query'den al, yoksa 'test-user'
+    const stateUid = typeof state === 'string' && state.length ? state : (typeof req.query.userId === 'string' ? req.query.userId : 'test-user');
+    // Tokenı ve mağaza adresini veritabanına kaydet (update ile mevcut alanları koru)
+    await admin.database().ref(`platformConnections/${stateUid}/shopify`).update({
       storeUrl: shop,
       accessToken,
       isConnected: true,
-      createdAt: Date.now(),
+      updatedAt: new Date().toISOString(),
+      ...(Date.now() ? { createdAt: Date.now() } : {}),
     });
     // Kullanıcıyı ayarlar sayfasına yönlendir
     res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=shopify")</script>');
@@ -234,8 +247,8 @@ router.get('/api/shopify/products', async (req, res) => {
     if (!accessToken) {
       return res.status(400).json({ error: 'Shopify access token bulunamadı.' });
     }
-    // Shopify ürünlerini çek
-    const response = await axios.get(`https://${storeUrl}/admin/api/2023-04/products.json`, {
+    // Shopify ürünlerini çek (güncel API versiyonu)
+    const response = await axios.get(`https://${storeUrl}/admin/api/2025-01/products.json`, {
       headers: {
         'X-Shopify-Access-Token': accessToken
       }
@@ -250,8 +263,10 @@ router.get('/api/shopify/products', async (req, res) => {
       cost: costs[p.id] || ""
     }));
     res.json({ products: productsWithCost });
-  } catch (error) {
-    res.status(500).json({ error: 'Shopify ürünleri alınamadı', details: error instanceof Error ? error.message : String(error) });
+  } catch (error: any) {
+    const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
+    console.error('[SHOPIFY PRODUCTS ERROR]', msg);
+    res.status(500).json({ error: 'Shopify ürünleri alınamadı', details: msg });
   }
 });
 
@@ -283,14 +298,16 @@ router.get('/api/shopify/orders', async (req, res) => {
     if (!accessToken) {
       return res.status(400).json({ error: 'Shopify access token bulunamadı.' });
     }
-    const response = await axios.get(`https://${storeUrl}/admin/api/2023-04/orders.json`, {
+    const response = await axios.get(`https://${storeUrl}/admin/api/2025-01/orders.json`, {
       headers: {
         'X-Shopify-Access-Token': accessToken
       }
     });
     res.json(response.data);
-  } catch (error) {
-    res.status(500).json({ error: 'Shopify siparişleri alınamadı', details: error instanceof Error ? error.message : String(error) });
+  } catch (error: any) {
+    const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
+    console.error('[SHOPIFY ORDERS ERROR]', msg);
+    res.status(500).json({ error: 'Shopify siparişleri alınamadı', details: msg });
   }
 });
 
@@ -308,14 +325,138 @@ router.get('/api/shopify/customers', async (req, res) => {
     if (!accessToken) {
       return res.status(400).json({ error: 'Shopify access token bulunamadı.' });
     }
-    const response = await axios.get(`https://${storeUrl}/admin/api/2023-04/customers.json`, {
+    const response = await axios.get(`https://${storeUrl}/admin/api/2025-01/customers.json`, {
       headers: {
         'X-Shopify-Access-Token': accessToken
       }
     });
     res.json(response.data);
+  } catch (error: any) {
+    const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
+    console.error('[SHOPIFY CUSTOMERS ERROR]', msg);
+    res.status(500).json({ error: 'Shopify müşterileri alınamadı', details: msg });
+  }
+});
+
+// Shopify access scopes görüntüleme (teşhis amaçlı)
+router.get('/api/shopify/access-scopes', async (req, res) => {
+  try {
+    const userId = req.query.userId || 'test-user';
+    const snapshot = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+    const shopifyConn = snapshot.val();
+    if (!shopifyConn || !shopifyConn.storeUrl || !shopifyConn.accessToken) {
+      return res.status(400).json({ error: 'Shopify bağlantısı veya token yok.' });
+    }
+    const storeUrl = shopifyConn.storeUrl;
+    const r = await axios.get(`https://${storeUrl}/admin/oauth/access_scopes.json`, {
+      headers: { 'X-Shopify-Access-Token': shopifyConn.accessToken }
+    });
+    return res.json(r.data);
+  } catch (error: any) {
+    const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
+    console.error('[SHOPIFY SCOPES ERROR]', msg);
+    return res.status(500).json({ error: 'Shopify access scopes alınamadı', details: msg });
+  }
+});
+
+// Shopify özet verisi: günlük sipariş ve ciro (varsayılan son 30 gün, dün bitiş)
+router.get('/api/shopify/summary', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const snap = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+    const conn = snap.val();
+    if (!conn?.storeUrl || !conn?.accessToken) {
+      return res.status(400).json({ message: 'Shopify bağlantısı bulunamadı.' });
+    }
+    // Tarih aralığı: son 30 gün, dünü bitiş al
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+  // İsteğe bağlı gelir modu: 'paid' (sadece ödenmişler) veya 'gross' (iptal olmayan tüm siparişlerin toplamı)
+  const revenueMode = (typeof req.query.revenueMode === 'string' ? req.query.revenueMode : 'gross') as 'paid' | 'gross';
+
+  // Pagination ile tüm siparişleri çek
+    const base = `https://${conn.storeUrl}/admin/api/2025-01/orders.json`;
+    const params = new URLSearchParams();
+    params.set('status', 'any');
+    params.set('limit', '250');
+    params.set('created_at_min', `${since}T00:00:00Z`);
+    params.set('created_at_max', `${until}T23:59:59Z`);
+  params.set('fields', 'id,created_at,total_price,subtotal_price,financial_status,cancelled_at,currency');
+
+    let nextUrl: string | null = `${base}?${params.toString()}`;
+  const dayMap: Record<string, { orders: number; revenueGross: number; revenuePaid: number } > = {};
+    let currency: string | null = null;
+    let safetyCount = 0;
+
+    while (nextUrl && safetyCount < 50) { // 50 * 250 = 12.5k orders max per request
+      safetyCount++;
+      const r = await fetchWithTimeout(nextUrl, {
+        method: 'GET',
+        headers: {
+          'X-Shopify-Access-Token': conn.accessToken,
+          'Content-Type': 'application/json',
+        },
+      }, 20000);
+      const json: any = await r.json();
+      if (!r.ok) {
+        return res.status(r.status).json({ message: 'Shopify orders alınamadı', error: json });
+      }
+      const orders: any[] = json.orders || [];
+      for (const o of orders) {
+        if (!currency && o.currency) currency = o.currency;
+        // İptal edilen siparişleri hariç tut
+        if (o.cancelled_at) continue;
+        const fs = String(o.financial_status || '').toLowerCase();
+        const date = String(o.created_at || '').slice(0, 10);
+        const price = Number.parseFloat(String(o.total_price || o.subtotal_price || '0')) || 0;
+        if (!dayMap[date]) dayMap[date] = { orders: 0, revenueGross: 0, revenuePaid: 0 };
+        // Sipariş sayısını finansal statüden bağımsız (iptal değilse) sayalım
+        dayMap[date].orders += 1;
+        // Brüt gelir: iptal olmayan tüm siparişlerin toplamı
+        dayMap[date].revenueGross += price;
+        // Ödenmiş gelir: yalnızca ödeme gerçekleşen statüler
+        if (['paid','partially_paid','partially_refunded'].includes(fs)) {
+          dayMap[date].revenuePaid += price;
+        }
+      }
+      // Cursor pagination: Link header kontrolü
+      const link = (r as any).headers?.get ? (r as any).headers.get('link') : undefined;
+      if (link && /<([^>]+)>; rel="next"/i.test(link)) {
+        const m = link.match(/<([^>]+)>; rel="next"/i);
+        nextUrl = m ? m[1] : null;
+      } else {
+        nextUrl = null;
+      }
+    }
+
+    // Zero-fill ve günlük dizi
+    const rows: Array<{ date: string; orders: number; revenue: number }> = [];
+    const cur = new Date(since as string);
+    const end = new Date(until as string);
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0, 10);
+      const v = dayMap[key] || { orders: 0, revenueGross: 0, revenuePaid: 0 } as any;
+      const rev = revenueMode === 'paid' ? v.revenuePaid : v.revenueGross;
+      rows.push({ date: key, orders: v.orders, revenue: Number(rev.toFixed(2)) });
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const totals = rows.reduce((acc, d) => { acc.orders += d.orders; acc.revenue += d.revenue; return acc; }, { orders: 0, revenue: 0 });
+    const aov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
+
+    return res.json({
+      rows,
+      totals: { ...totals, aov: Number(aov.toFixed(2)), currency: currency || 'TRY', revenueMode },
+      requestedRange: { startDate: since, endDate: until }
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Shopify müşterileri alınamadı', details: error instanceof Error ? error.message : String(error) });
+    console.error('[Shopify SUMMARY ERROR]', error);
+    return res.status(500).json({ message: 'Shopify özet verisi çekilemedi', error: String(error) });
   }
 });
 
@@ -427,7 +568,7 @@ router.get('/api/shopify/data', async (req: express.Request, res: express.Respon
       return res.status(400).json({ error: 'Shopify bağlantısı veya token bulunamadı.' });
     }
     const storeUrl = shopifyConn.storeUrl;
-    const response = await axios.get(`https://${storeUrl}/admin/api/2023-07/orders.json?status=any&limit=5`, {
+    const response = await axios.get(`https://${storeUrl}/admin/api/2025-01/orders.json?status=any&limit=5`, {
       headers: {
         'X-Shopify-Access-Token': shopifyConn.accessToken,
         'Content-Type': 'application/json',
@@ -435,7 +576,9 @@ router.get('/api/shopify/data', async (req: express.Request, res: express.Respon
     });
     res.json(response.data);
   } catch (error: any) {
-    res.status(500).json({ error: 'Shopify canlı veri alınamadı', details: error instanceof Error ? error.message : String(error) });
+    const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
+    console.error('[SHOPIFY DATA ERROR]', msg);
+    res.status(500).json({ error: 'Shopify canlı veri alınamadı', details: msg });
   }
 });
 
@@ -634,7 +777,8 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
         if (!storeUrl) {
           return res.status(400).json({ message: 'Shopify mağaza adresi eksik.' });
         }
-        await admin.database().ref(`platformConnections/${userId}/shopify`).set({ storeUrl });
+        // update kullan: accessToken/isConnected gibi alanları silme
+        await admin.database().ref(`platformConnections/${userId}/shopify`).update({ storeUrl, updatedAt: new Date().toISOString() });
         return res.json({ message: 'Shopify mağaza adresi kaydedildi.', storeUrl });
       }
       // Meta reklam hesabı güncelleme

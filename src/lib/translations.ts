@@ -83,9 +83,13 @@ export const translations = {
     
     // Dashboard specific translations
     genelBakış: "Genel Bakış",
+  store: "Mağaza",
     
     // KPI translations
-    conversions: "Dönüşümler",
+  conversions: "Dönüşümler",
+  revenue: "Gelir",
+  orders: "Sipariş",
+  aov: "Ortalama Sepet",
 
   // Meta widgets
   spend: "Harcama",
@@ -209,9 +213,12 @@ export const translations = {
     
     // Dashboard specific translations
     genelBakış: "Overview",
+  store: "Store",
     
     // KPI translations
     conversions: "Conversions",
+  orders: "Orders",
+  aov: "AOV",
     
     // Action Center
     todaysInsight: "Today's Insight",

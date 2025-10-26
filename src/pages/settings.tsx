@@ -51,6 +51,8 @@ export default function Settings() {
   const { toast } = useToast();
   const [profileData, setProfileData] = useState<BrandProfile>({} as BrandProfile);
   const [selectedGaPropertyId, setSelectedGaPropertyId] = useState<string>('');
+  const [isEditingShopifyStore, setIsEditingShopifyStore] = useState<boolean>(false);
+  const [shopifyStoreDraft, setShopifyStoreDraft] = useState<string>('');
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -84,6 +86,8 @@ export default function Settings() {
           isConnected: true,
         },
       }));
+      // Sunucudan gerçek durumu tekrar çek (öbür bağlantılar etkilenmesin)
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
       // URL'i temizle
       const url = new URL(window.location.href);
       url.searchParams.delete('connection');
@@ -279,6 +283,58 @@ export default function Settings() {
     }
   };
 
+  // Yardımcı: Shopify domain normalize et
+  const normalizeShopDomain = (val: string) => {
+    let s = (val || '').trim();
+    s = s.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (!s) return '';
+    if (!/\.myshopify\.com$/i.test(s)) s = `${s}.myshopify.com`;
+    return s.toLowerCase();
+  };
+
+  const handleSaveShopifyStore = async () => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id;
+      const normalized = normalizeShopDomain(shopifyStoreDraft);
+      if (!normalized) {
+        toast({ title: 'Hata', description: 'Geçerli bir mağaza adı girin', variant: 'destructive' });
+        return;
+      }
+      const resp = await apiRequest('POST', '/api/connections', { platform: 'shopify', storeUrl: normalized, userId: uid });
+      await resp.json();
+      try { localStorage.setItem('iqsion_shopify_store', normalized); } catch (_) {}
+      // Cache'i anında güncelle
+      queryClient.setQueryData(['connections', uid], (prev: any) => ({
+        ...(prev || {}),
+        shopify: {
+          ...(((prev as any)?.shopify) || {}),
+          storeUrl: normalized,
+          // Bağlı değilse bile mağaza bilgisi güncel olsun
+          isConnected: (prev as any)?.shopify?.isConnected || false,
+        }
+      }));
+      toast({ title: 'Kaydedildi', description: `Mağaza: ${normalized}` });
+      setIsEditingShopifyStore(false);
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Mağaza kaydedilemedi', variant: 'destructive' });
+    }
+  };
+
+  const handleClearShopifyStore = async () => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id;
+      try { localStorage.removeItem('iqsion_shopify_store'); } catch (_) {}
+      // Sunucudaki bağlantıyı kaldır (storeUrl/token temizlenir)
+      await apiRequest('POST', '/api/disconnect', { platform: 'shopify', userId: uid });
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
+      toast({ title: 'Temizlendi', description: 'Shopify mağaza bilgisi sıfırlandı' });
+      setShopifyStoreDraft('');
+      setIsEditingShopifyStore(true);
+    } catch (_) {
+      toast({ title: 'Hata', description: 'Mağaza temizlenemedi', variant: 'destructive' });
+    }
+  };
+
   const handleDisconnectPlatform = async (platformId: string) => {
     try {
       const uid = (user as any)?.uid || (user as any)?.id;
@@ -376,20 +432,40 @@ export default function Settings() {
   const handleTestShopifyConnection = async () => {
     const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
     try {
+      // Önce hangi scope'lar var görelim
+      const scopesRes = await apiRequest('GET', `/api/shopify/access-scopes?userId=${encodeURIComponent(uid)}`);
+      let scopesList: string[] = [];
+      if (scopesRes.ok) {
+        const scopesJson = await scopesRes.json();
+        scopesList = Array.isArray(scopesJson.access_scopes) ? scopesJson.access_scopes.map((s: any) => s.handle) : [];
+      }
+      const hasReadOrders = scopesList.includes('read_orders');
+      const hasReadAllOrders = scopesList.includes('read_all_orders');
+      const missingOrdersScope = !hasReadOrders;
+
       const [productsRes, customersRes, ordersRes] = await Promise.all([
         apiRequest('GET', `/api/shopify/products?userId=${encodeURIComponent(uid)}`),
         apiRequest('GET', `/api/shopify/customers?userId=${encodeURIComponent(uid)}`),
         apiRequest('GET', `/api/shopify/data?userId=${encodeURIComponent(uid)}`),
       ]);
-      const productsJson = productsRes.ok ? await productsRes.json() : { products: [] };
-      const customersJson = customersRes.ok ? await customersRes.json() : { customers: [] };
-      const ordersJson = ordersRes.ok ? await ordersRes.json() : { orders: [] };
+      const productsJson = await productsRes.json().catch(() => ({}));
+      const customersJson = await customersRes.json().catch(() => ({}));
+      const ordersJson = await ordersRes.json().catch(() => ({}));
+      if (!productsRes.ok || !customersRes.ok || !ordersRes.ok) {
+        const msg = productsJson?.details || customersJson?.details || ordersJson?.details || 'Veri çekilemedi';
+        // Özel yönlendirme: read_orders izni yoksa kullanıcıya açıklayıcı mesaj ver
+        if (missingOrdersScope) {
+          throw new Error('Orders verisini çekmek için read_orders izni gerekli. Uygulama ayarlarında Admin API scopes altında "Read orders" (ve 60+ gün için "read_all_orders") işaretli olmalı; ardından uygulamayı yeniden yetkilendirmeniz gerekir.');
+        }
+        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      }
       const productsCount = Array.isArray(productsJson.products) ? productsJson.products.length : (productsJson.count || 0);
       const customersCount = Array.isArray(customersJson.customers) ? customersJson.customers.length : (customersJson.count || 0);
       const ordersCount = Array.isArray(ordersJson.orders) ? ordersJson.orders.length : (Array.isArray(ordersJson) ? ordersJson.length : 0);
       toast({ title: 'Shopify OK', description: `Ürün: ${productsCount}, Müşteri: ${customersCount}, Sipariş: ${ordersCount}` });
     } catch (e) {
-      toast({ title: 'Shopify hata', description: 'Veri çekilemedi', variant: 'destructive' });
+      const msg = e instanceof Error ? e.message : 'Veri çekilemedi';
+      toast({ title: 'Shopify hata', description: msg, variant: 'destructive' });
     }
   };
 
@@ -630,6 +706,49 @@ export default function Settings() {
                                         ))}
                                       </SelectContent>
                                     </Select>
+                                  </div>
+                                )}
+                                {/* Shopify mağaza düzenleme */}
+                                {platform.id === 'shopify' && (
+                                  <div className="mt-2 space-y-2">
+                                    <div className="flex items-center justify-between text-xs text-slate-400">
+                                      <span>Mağaza</span>
+                                      {!isEditingShopifyStore && (
+                                        <button
+                                          className="underline hover:text-slate-300"
+                                          onClick={() => {
+                                            const current = ((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '';
+                                            setShopifyStoreDraft(current);
+                                            setIsEditingShopifyStore(true);
+                                          }}
+                                        >
+                                          Mağazayı değiştir
+                                        </button>
+                                      )}
+                                    </div>
+                                    {!isEditingShopifyStore ? (
+                                      <div className="text-sm text-slate-300">
+                                        {((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '—'}
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <Input
+                                          placeholder="mystore veya mystore.myshopify.com"
+                                          value={shopifyStoreDraft}
+                                          onChange={(e) => setShopifyStoreDraft(e.target.value)}
+                                          className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-72"
+                                        />
+                                        <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleSaveShopifyStore}>
+                                          Kaydet
+                                        </Button>
+                                        <Button size="sm" variant="outline" className="border-slate-600 text-slate-300" onClick={() => setIsEditingShopifyStore(false)}>
+                                          İptal
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={handleClearShopifyStore}>
+                                          Mağaza bilgisini temizle
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>

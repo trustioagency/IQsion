@@ -21,7 +21,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Clock as ClockIcon } from 'lucide-react';
 
 type DateRangeKey = '7d' | '30d' | '90d' | 'custom';
-type ChannelKey = 'all' | 'google' | 'meta' | 'tiktok' | 'email' | 'organic';
+type ChannelKey = 'all' | 'google' | 'meta' | 'tiktok' | 'email' | 'organic' | 'shopify';
 type MetricKey = 'revenue' | 'roas' | 'conversions' | 'traffic' | 'cost';
 
 // GA API response minimal typings
@@ -126,6 +126,7 @@ export default function Dashboard() {
 
   const selectedGaPropertyId: string | undefined = (connections as any)?.google_analytics?.propertyId;
   const metaConnected: boolean = !!(connections as any)?.meta_ads?.isConnected;
+  const shopifyConnected: boolean = !!(connections as any)?.shopify?.isConnected;
 
   // 2) Fetch GA summary if property selected
   const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
@@ -193,6 +194,39 @@ export default function Dashboard() {
     }
   });
 
+  // 4) Fetch Shopify summary when connection exists (shown under Mağaza section)
+  const makeShopifyRange = (key: DateRangeKey) => {
+    const today = new Date();
+    const end = new Date(today); end.setDate(today.getDate() - 1);
+    const start = new Date(end);
+    const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 29;
+    start.setDate(end.getDate() - days);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { startDate: fmt(start), endDate: fmt(end) };
+  };
+
+  type ShopifySummary = {
+    rows: Array<{ date: string; orders: number; revenue: number }>;
+    totals: { orders: number; revenue: number; aov: number; currency?: string; revenueMode?: 'gross' | 'paid' };
+    requestedRange: { startDate: string; endDate: string };
+  } | null;
+
+  const { data: shopifySummary, isLoading: shopifyLoading } = useQuery<ShopifySummary>({
+    queryKey: ['shopify-summary', uid, dateRange],
+    enabled: !!user && shopifyConnected && selectedChannel === 'shopify',
+    queryFn: async () => {
+      const { startDate, endDate } = makeShopifyRange(dateRange);
+      const url = new URL('/api/shopify/summary', window.location.origin);
+      url.searchParams.set('userId', uid);
+      url.searchParams.set('startDate', startDate);
+      url.searchParams.set('endDate', endDate);
+      url.searchParams.set('revenueMode', 'gross');
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      if (!res.ok) return null as any;
+      return res.json();
+    }
+  });
+
   // Channel options grouped by category for a clearer UX in the "Tüm Kanallar" filter
   const channelGroups: Array<{
     label: string;
@@ -215,6 +249,12 @@ export default function Dashboard() {
       items: [
         { value: 'organic', label: language === 'tr' ? 'Organik' : 'Organic', color: 'bg-emerald-500' },
         { value: 'email', label: 'Email', color: 'bg-purple-500' },
+      ],
+    },
+    {
+      label: language === 'tr' ? 'Mağaza' : 'Store',
+      items: [
+        { value: 'shopify', label: 'Shopify', color: 'bg-green-600' },
       ],
     },
     // Gelecek için yer tutucu: mağaza/site/CRM filtreleri
@@ -379,7 +419,10 @@ export default function Dashboard() {
 
   const gaConnected = !!selectedGaPropertyId;
 
-  const effectiveLoading = authLoading || (selectedChannel === 'meta' ? (metaConnected && metaLoading) : (gaConnected && isLoading));
+  const effectiveLoading = authLoading ||
+    (selectedChannel === 'meta' ? (metaConnected && metaLoading)
+      : selectedChannel === 'shopify' ? (shopifyConnected && shopifyLoading)
+      : (gaConnected && isLoading));
   if (effectiveLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -504,6 +547,10 @@ export default function Dashboard() {
         <div className="text-xs text-slate-400 -mt-4">
           Range: {metaSummary.requestedRange.startDate} → {metaSummary.requestedRange.endDate} | Channel: meta
         </div>
+      ) : selectedChannel === 'shopify' && shopifySummary && shopifySummary.requestedRange ? (
+        <div className="text-xs text-slate-400 -mt-4">
+          Range: {shopifySummary.requestedRange.startDate} → {shopifySummary.requestedRange.endDate} | Channel: shopify
+        </div>
       ) : (gaSummary && gaSummary.requestedRange ? (
         <div className="text-xs text-slate-400 -mt-4">
           Range: {gaSummary.requestedRange.startDate} → {gaSummary.requestedRange.endDate} | Channel: {gaSummary.channelApplied}
@@ -565,6 +612,27 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+      ) : selectedChannel === 'shopify' && shopifyConnected ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('orders')}</h4>
+              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(shopifySummary?.totals?.orders || 0)}</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('revenue')}</h4>
+              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.revenue || 0)}</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-6">
+              <h4 className="text-slate-400 text-sm mb-2">{t('aov')}</h4>
+              <p className="text-2xl font-bold text-white">{new Intl.NumberFormat('tr-TR', { style: 'currency', currency: shopifySummary?.totals?.currency || 'TRY', maximumFractionDigits: 0 }).format(shopifySummary?.totals?.aov || 0)}</p>
+            </CardContent>
+          </Card>
+        </div>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpiData.map((kpi, index) => {
@@ -603,6 +671,8 @@ export default function Dashboard() {
         })}
       </div>
       )}
+
+      {/* Shopify KPIs artık kanal filtresi üzerinden gösteriliyor (duplicated block removed) */}
 
       {/* Charts: switch to Meta daily Spend/Clicks when meta selected */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -650,6 +720,53 @@ export default function Dashboard() {
                       <Bar yAxisId="left" dataKey="impressions" fill="#6366F1" />
                       <Line yAxisId="right" type="monotone" dataKey="ctr" stroke="#F59E0B" strokeWidth={3} />
                     </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        ) : selectedChannel === 'shopify' && shopifyConnected ? (
+          <>
+            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  {t('revenue')} / {t('orders')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={(shopifySummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', revenue: r.revenue, orders: r.orders }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="date" stroke="#9CA3AF" />
+                      <YAxis yAxisId="left" stroke="#9CA3AF" />
+                      <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" />
+                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
+                      <Bar yAxisId="left" dataKey="revenue" fill="#3B82F6" />
+                      <Line yAxisId="right" type="monotone" dataKey="orders" stroke="#10B981" strokeWidth={3} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/80 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5" />
+                  {t('aov')}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={(shopifySummary?.rows || []).map(r => ({ date: r.date ? r.date.slice(5) : '', aov: (r.orders > 0 ? r.revenue / r.orders : 0) }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="date" stroke="#9CA3AF" />
+                      <YAxis stroke="#9CA3AF" />
+                      <Tooltip contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '8px', color: '#F3F4F6' }} />
+                      <Line type="monotone" dataKey="aov" stroke="#F59E0B" strokeWidth={3} />
+                    </LineChart>
                   </ResponsiveContainer>
                 </div>
               </CardContent>
