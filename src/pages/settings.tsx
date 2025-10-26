@@ -69,18 +69,18 @@ export default function Settings() {
     }
   }, [user, authLoading, toast]);
 
-  // OAuth dönüşünde bağlantı durumunu hemen yansıt (UX): /settings?connection=success&platform=meta_ads
+  // OAuth dönüşünde bağlantı durumunu hemen yansıt (UX)
   useEffect(() => {
     if (!user) return;
     const uid = (user as any)?.uid || (user as any)?.id;
     const params = new URLSearchParams(window.location.search);
     const connection = params.get('connection');
     const platform = params.get('platform');
-    if (connection === 'success' && platform === 'meta_ads') {
+    if (connection === 'success' && platform) {
       queryClient.setQueryData(['connections', uid], (prev: any) => ({
         ...(prev || {}),
-        meta_ads: {
-          ...((prev && prev.meta_ads) || {}),
+        [platform]: {
+          ...((prev && (prev as any)[platform]) || {}),
           isConnected: true,
         },
       }));
@@ -218,12 +218,24 @@ export default function Settings() {
       const baseUrl = window.location.origin;
       
       switch (platformId) {
-        case 'shopify':
-          const shopName = prompt('Shopify mağaza adınızı girin (örn: mystore):');
-          if (!shopName) return;
-          // Backend üzerinden OAuth başlat
-          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(`${shopName}.myshopify.com`)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
-          break;
+        case 'shopify': {
+          // Eğer bağlantı kayıtlarında mağaza zaten biliniyorsa direkt yönlendir (prompt yok)
+          const savedStore = (connections as any)?.shopify?.storeUrl as string | undefined;
+          let storeUrl = savedStore || localStorage.getItem('iqsion_shopify_store') || '';
+          if (!storeUrl) {
+            // Son çare: kısa isim al (örn: mystore); kullanıcı istemiyorsa Cancel edebilir
+            const name = prompt('Shopify mağaza adınızı girin (örn: mystore veya mystore.myshopify.com):') || '';
+            if (!name) return;
+            storeUrl = name;
+          }
+          // Normalizasyon: sadece isim verildiyse domain ekle; protocol varsa kırp
+          storeUrl = storeUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          if (!/\.myshopify\.com$/i.test(storeUrl)) {
+            storeUrl = `${storeUrl}.myshopify.com`;
+          }
+          try { localStorage.setItem('iqsion_shopify_store', storeUrl); } catch (_) {}
+          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
+          break; }
         case 'google_ads':
           authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
@@ -360,6 +372,26 @@ export default function Settings() {
     { id: 'google_search_console', name: 'Google Search Console', description: 'Arama motoru optimizasyonu verileri' },
     { id: 'tiktok', name: 'TikTok Ads', description: 'TikTok reklam platformu' },
   ];
+
+  const handleTestShopifyConnection = async () => {
+    const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+    try {
+      const [productsRes, customersRes, ordersRes] = await Promise.all([
+        apiRequest('GET', `/api/shopify/products?userId=${encodeURIComponent(uid)}`),
+        apiRequest('GET', `/api/shopify/customers?userId=${encodeURIComponent(uid)}`),
+        apiRequest('GET', `/api/shopify/data?userId=${encodeURIComponent(uid)}`),
+      ]);
+      const productsJson = productsRes.ok ? await productsRes.json() : { products: [] };
+      const customersJson = customersRes.ok ? await customersRes.json() : { customers: [] };
+      const ordersJson = ordersRes.ok ? await ordersRes.json() : { orders: [] };
+      const productsCount = Array.isArray(productsJson.products) ? productsJson.products.length : (productsJson.count || 0);
+      const customersCount = Array.isArray(customersJson.customers) ? customersJson.customers.length : (customersJson.count || 0);
+      const ordersCount = Array.isArray(ordersJson.orders) ? ordersJson.orders.length : (Array.isArray(ordersJson) ? ordersJson.length : 0);
+      toast({ title: 'Shopify OK', description: `Ürün: ${productsCount}, Müşteri: ${customersCount}, Sipariş: ${ordersCount}` });
+    } catch (e) {
+      toast({ title: 'Shopify hata', description: 'Veri çekilemedi', variant: 'destructive' });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -611,6 +643,11 @@ export default function Settings() {
                                   </Badge>
                                   {platform.id === 'meta_ads' && (
                                     <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestMetaConnection}>
+                                      Bağlantıyı test et
+                                    </Button>
+                                  )}
+                                  {platform.id === 'shopify' && (
+                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestShopifyConnection}>
                                       Bağlantıyı test et
                                     </Button>
                                   )}

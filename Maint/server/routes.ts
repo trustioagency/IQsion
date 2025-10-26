@@ -175,7 +175,7 @@ router.post('/api/auth/login', async (req, res) => {
 // (tekrar) kaldırıldı
 // Shopify OAuth başlatma endpointi
 router.get('/api/auth/shopify/connect', (req, res) => {
-  const storeUrl = req.query.storeUrl as string;
+  let storeUrl = (req.query.storeUrl as string) || '';
   const userId = (req.query.userId as string) || 'test-user';
   const scopes = 'read_orders,read_products,read_customers';
   // Normalize host and compute redirect dynamically to avoid port mismatches in local (e.g., 5000 vs 5001)
@@ -184,6 +184,11 @@ router.get('/api/auth/shopify/connect', (req, res) => {
   const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/shopify/callback`;
   const redirectEnv = process.env.SHOPIFY_REDIRECT_URI || '';
   const redirectUri = /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv) ? computedRedirect : (redirectEnv || computedRedirect);
+  // Normalize storeUrl: allow 'mystore' or 'mystore.myshopify.com', strip protocol
+  storeUrl = (storeUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!/\.myshopify\.com$/i.test(storeUrl)) {
+    storeUrl = `${storeUrl}.myshopify.com`;
+  }
   const authUrl = `https://${storeUrl}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(userId)}`;
   res.redirect(authUrl);
 });
