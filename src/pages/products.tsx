@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -26,6 +27,33 @@ import {
   Trophy,
   Link2 as Link
 } from "lucide-react";
+import { useAuth } from "../hooks/useAuth";
+
+type ShopifyVariant = {
+  id: number | string;
+  price?: string;
+  inventory_quantity?: number;
+  inventory_item_id?: number | string;
+  inventory_cost?: number;
+};
+
+type ShopifyImage = {
+  src?: string;
+};
+
+type ShopifyProduct = {
+  id: number | string;
+  title: string;
+  vendor?: string;
+  product_type?: string;
+  status?: string;
+  created_at?: string;
+  image?: ShopifyImage | null;
+  images?: ShopifyImage[];
+  variants?: ShopifyVariant[];
+  cost?: string | number;
+  costSource?: 'shopify' | 'manual';
+};
 
 interface Product {
   id: number;
@@ -53,10 +81,25 @@ interface ProductInsight {
 }
 
 export default function Products() {
+  const { user } = useAuth();
+  const uid = (user as any)?.uid || (user as any)?.id;
+  const queryClient = useQueryClient();
   const [sortBy, setSortBy] = useState('performanceScore');
   const [filterCategory, setFilterCategory] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [costInputs, setCostInputs] = useState<Record<string, string>>({});
+  const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({});
+
+  const { data: shopifyProductsData, isLoading: shopifyLoading, error: shopifyError } = useQuery<{ products: ShopifyProduct[] } | null>({
+    queryKey: ['shopify-products', uid],
+    enabled: !!uid,
+    queryFn: async () => {
+      const res = await fetch(`/api/shopify/products?userId=${encodeURIComponent(uid)}`, { credentials: 'include' });
+      if (!res.ok) return null;
+      return res.json();
+    }
+  });
 
   // Mock data
   const overviewStats = {
@@ -199,6 +242,56 @@ export default function Products() {
         default: return 0;
       }
     });
+
+  // Shopify products filtered list for the table
+  const shopifyProducts = shopifyProductsData?.products || [];
+  const filteredShopifyProducts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return shopifyProducts.filter(p => {
+      const title = (p.title || '').toLowerCase();
+      const vendor = (p.vendor || '').toLowerCase();
+      return !term || title.includes(term) || vendor.includes(term);
+    });
+  }, [shopifyProducts, searchTerm]);
+
+  const saveCost = useMutation({
+    mutationFn: async ({ id, cost }: { id: string | number; cost: string }) => {
+      const res = await fetch(`/api/shopify/products/${encodeURIComponent(String(id))}/cost?userId=${encodeURIComponent(uid)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cost }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Maliyet kaydedilemedi');
+      }
+      return res.json();
+    },
+    onMutate: ({ id }) => {
+      setSaveStatus((s) => ({ ...s, [String(id)]: 'saving' }));
+    },
+    onSuccess: (_data, { id }) => {
+      setSaveStatus((s) => ({ ...s, [String(id)]: 'success' }));
+      // Bir süre sonra ibareyi kaldır
+      setTimeout(() => {
+        setSaveStatus((s) => ({ ...s, [String(id)]: 'idle' }));
+      }, 2000);
+    },
+    onError: (_err, { id }) => {
+      setSaveStatus((s) => ({ ...s, [String(id)]: 'error' }));
+      setTimeout(() => {
+        setSaveStatus((s) => ({ ...s, [String(id)]: 'idle' }));
+      }, 2500);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['shopify-products', uid] });
+    }
+  });
+
+  const handleCostChange = (id: string | number, value: string) => {
+    setCostInputs(prev => ({ ...prev, [String(id)]: value }));
+  };
 
   return (
     <div className="space-y-6">
@@ -431,11 +524,11 @@ export default function Products() {
               </CardContent>
             </Card>
 
-            {/* B. Akıllı Ürün Grid'i */}
+            {/* Shopify Ürünleri Tablosu */}
             <Card className="bg-slate-800 border-slate-700">
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <CardTitle className="text-white">Ürün Performans Listesi</CardTitle>
+                  <CardTitle className="text-white">Shopify Ürünleri</CardTitle>
 
                   <div className="flex items-center gap-4">
                     <div className="relative">
@@ -447,162 +540,110 @@ export default function Products() {
                         className="pl-10 bg-slate-700 border-slate-600 text-slate-300 w-48"
                       />
                     </div>
-
-                    <Select value={filterCategory} onValueChange={setFilterCategory}>
-                      <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-300 w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-600">
-                        <SelectItem value="all">Tüm Kategoriler</SelectItem>
-                        <SelectItem value="Elektronik">Elektronik</SelectItem>
-                        <SelectItem value="Giyim">Giyim</SelectItem>
-                        <SelectItem value="Ev & Yaşam">Ev & Yaşam</SelectItem>
-                        <SelectItem value="Spor">Spor</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <Select value={sortBy} onValueChange={setSortBy}>
-                      <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-300 w-40">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-600">
-                        <SelectItem value="performanceScore">Performans Skoru</SelectItem>
-                        <SelectItem value="revenue">Ciro</SelectItem>
-                        <SelectItem value="profit">Kâr</SelectItem>
-                        <SelectItem value="salesCount">Satış Adedi</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-slate-700">
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Ürün</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Kategori</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Fiyat</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Satış (30g)</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Ciro</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Kârlılık</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Stok</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">Performans</th>
-                        <th className="text-left py-3 px-4 text-slate-400 font-medium">İşlemler</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredProducts.map((product) => (
-                        <tr key={product.id} className="border-b border-slate-700/50 hover:bg-slate-700/30">
-                          <td className="py-4 px-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-12 h-12 bg-slate-600 rounded-lg flex items-center justify-center">
-                                <Package className="w-6 h-6 text-slate-400" />
-                              </div>
-                              <div>
-                                <p className="text-white font-medium">{product.name}</p>
-                                <p className="text-slate-400 text-sm">{product.sku}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-4 px-4">
-                            <Badge variant="secondary" className="bg-slate-700 text-slate-300">
-                              {product.category}
-                            </Badge>
-                          </td>
-                          <td className="py-4 px-4 text-white">₺{product.price.toLocaleString()}</td>
-                          <td className="py-4 px-4 text-white">{product.salesCount}</td>
-                          <td className="py-4 px-4 text-white">₺{product.revenue.toLocaleString()}</td>
-                          <td className="py-4 px-4">
-                            <div className="text-green-400">₺{product.profit.toLocaleString()}</div>
-                            <div className="text-slate-400 text-sm">%{product.profitMargin}</div>
-                          </td>
-                          <td className="py-4 px-4">
-                            <span className={`${product.stock < 30 ? 'text-orange-400' : 'text-white'}`}>
-                              {product.stock}
-                            </span>
-                          </td>
-                          <td className="py-4 px-4">
-                            <Badge className={getPerformanceColor(product.performanceGrade)}>
-                              {product.performanceGrade} ({product.performanceScore}/100)
-                            </Badge>
-                          </td>
-                          <td className="py-4 px-4">
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                                  onClick={() => setSelectedProduct(product)}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="bg-slate-800 border-slate-700 text-slate-300 max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle className="text-white">
-                                    {product.name}
-                                  </DialogTitle>
-                                </DialogHeader>
-
-                                {selectedProduct && (
-                                  <div className="space-y-6">
-                                    {/* Performans Özeti */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                      <div className="bg-slate-700/50 p-4 rounded-lg">
-                                        <h4 className="text-slate-400 text-sm mb-1">Performans Skoru</h4>
-                                        <div className="flex items-center gap-2">
-                                          <Badge className={getPerformanceColor(selectedProduct.performanceGrade)}>
-                                            {selectedProduct.performanceGrade}
-                                          </Badge>
-                                          <span className="text-white font-bold">({selectedProduct.performanceScore}/100)</span>
-                                        </div>
-                                      </div>
-                                      <div className="bg-slate-700/50 p-4 rounded-lg">
-                                        <h4 className="text-slate-400 text-sm mb-1">Son 30 Gün Kâr</h4>
-                                        <p className="text-green-400 font-bold text-lg">₺{selectedProduct.profit.toLocaleString()}</p>
-                                      </div>
-                                    </div>
-
-                                    {/* AI İçgörüleri */}
-                                    <div>
-                                      <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-                                        <Lightbulb className="w-5 h-5 text-yellow-400" />
-                                        AI İçgörüleri
-                                      </h3>
-
-                                      <div className="space-y-4">
-                                        {selectedProduct.insights.map((insight, index) => (
-                                          <div key={index} className="bg-slate-700/30 p-4 rounded-lg border border-slate-600">
-                                            <div className="flex items-start gap-3">
-                                              {getInsightIcon(insight.type)}
-                                              <div className="flex-1">
-                                                <h4 className="text-white font-medium mb-2">{insight.title}</h4>
-                                                <p className="text-slate-300 text-sm mb-3">{insight.description}</p>
-                                                {insight.action && (
-                                                  <Button 
-                                                    size="sm" 
-                                                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                                                  >
-                                                    {insight.action}
-                                                  </Button>
-                                                )}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </DialogContent>
-                            </Dialog>
-                          </td>
+                  {shopifyLoading && (
+                    <div className="text-slate-400 text-sm p-4">Shopify ürünleri yükleniyor...</div>
+                  )}
+                  {shopifyError && (
+                    <div className="text-red-400 text-sm p-4">Shopify ürünleri alınamadı.</div>
+                  )}
+                  {!shopifyLoading && !shopifyError && (
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-slate-700">
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Ürün</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Marka</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Kategori</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Fiyat</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Maliyet</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Stok</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Durum</th>
+                          <th className="text-left py-3 px-4 text-slate-400 font-medium">Oluşturma</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {filteredShopifyProducts.map((p) => {
+                          const img = p.image?.src || p.images?.[0]?.src || '';
+                          const prices = (p.variants || []).map(v => Number(v.price || 0)).filter(n => Number.isFinite(n) && n > 0);
+                          const priceMin = prices.length ? Math.min(...prices) : 0;
+                          const priceMax = prices.length ? Math.max(...prices) : 0;
+                          const priceLabel = prices.length > 1 ? `₺${priceMin.toLocaleString('tr-TR')} - ₺${priceMax.toLocaleString('tr-TR')}` : `₺${priceMin.toLocaleString('tr-TR')}`;
+                          const stock = (p.variants || []).reduce((acc, v) => acc + (v.inventory_quantity || 0), 0);
+                          const created = p.created_at ? new Date(p.created_at).toLocaleDateString('tr-TR') : '';
+                          return (
+                            <tr key={p.id} className="border-b border-slate-700/50 hover:bg-slate-700/30">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-slate-700 rounded overflow-hidden flex items-center justify-center">
+                                    {img ? (
+                                      <img src={img} alt={p.title} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <Package className="w-5 h-5 text-slate-400" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-white font-medium line-clamp-1" title={p.title}>{p.title}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-300">{p.vendor || '-'}</td>
+                              <td className="py-3 px-4">
+                                <Badge variant="secondary" className="bg-slate-700 text-slate-300">
+                                  {p.product_type || '-'}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-4 text-white">{priceLabel}</td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    value={costInputs[String(p.id)] ?? String(p.cost ?? '')}
+                                    onChange={(e) => handleCostChange(p.id, e.target.value)}
+                                    placeholder="₺0"
+                                    className="h-8 w-28 bg-slate-700 border-slate-600 text-slate-200"
+                                    disabled={p.costSource === 'shopify'}
+                                  />
+                                  {p.costSource !== 'shopify' ? (
+                                    <Button
+                                      size="sm"
+                                      className="h-8 px-2 bg-slate-700 hover:bg-slate-600"
+                                      disabled={saveStatus[String(p.id)] === 'saving' || ((costInputs[String(p.id)] ?? String(p.cost ?? '')).trim() === String(p.cost ?? ''))}
+                                      onClick={() => saveCost.mutate({ id: p.id, cost: (costInputs[String(p.id)] ?? String(p.cost ?? '')).trim() })}
+                                    >
+                                      {saveStatus[String(p.id)] === 'saving' ? 'Kaydediliyor...' : 'Kaydet'}
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-slate-400 border border-slate-600 rounded px-2 py-1">Shopify</span>
+                                  )}
+                                  {saveStatus[String(p.id)] === 'success' && (
+                                    <span className="text-emerald-400 text-xs flex items-center gap-1">
+                                      <CheckCircle className="w-3.5 h-3.5" /> Kaydedildi
+                                    </span>
+                                  )}
+                                  {saveStatus[String(p.id)] === 'error' && (
+                                    <span className="text-red-400 text-xs flex items-center gap-1">
+                                      <AlertCircle className="w-3.5 h-3.5" /> Hata
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-white">{stock}</td>
+                              <td className="py-3 px-4 text-slate-300">{p.status || '-'}</td>
+                              <td className="py-3 px-4 text-slate-300">{created}</td>
+                            </tr>
+                          );
+                        })}
+                        {!filteredShopifyProducts.length && (
+                          <tr>
+                            <td colSpan={8} className="py-6 px-4 text-slate-400 text-sm">Hiç ürün bulunamadı.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </CardContent>
             </Card>

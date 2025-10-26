@@ -254,14 +254,61 @@ router.get('/api/shopify/products', async (req, res) => {
       }
     });
     const products = response.data.products || [];
+    // Tüm varyantların inventory_item_id'lerini toplayıp cost bilgilerini çek
+    const allInventoryItemIds: Array<string | number> = [];
+    for (const p of products) {
+      const variants = Array.isArray(p?.variants) ? p.variants : [];
+      for (const v of variants) {
+        if (v && (v.inventory_item_id !== undefined && v.inventory_item_id !== null)) {
+          allInventoryItemIds.push(v.inventory_item_id);
+        }
+      }
+    }
+    const uniqueIds = Array.from(new Set(allInventoryItemIds.map(String)));
+    const chunk = <T,>(arr: T[], size = 250): T[][] => {
+      const out: T[][] = [];
+      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    };
+    const idChunks = chunk(uniqueIds, 250);
+    const invCostMap: Record<string, number> = {};
+    for (const ch of idChunks) {
+      if (!ch.length) continue;
+      const invRes = await axios.get(`https://${storeUrl}/admin/api/2025-01/inventory_items.json`, {
+        params: { ids: ch.join(',') },
+        headers: { 'X-Shopify-Access-Token': accessToken }
+      });
+      const items = invRes.data?.inventory_items || [];
+      for (const it of items) {
+        const idStr = String(it.id);
+        const costNum = Number(it.cost);
+        if (Number.isFinite(costNum) && costNum > 0) {
+          invCostMap[idStr] = costNum;
+        }
+      }
+    }
     // Firebase'den maliyetleri çek
     const costsSnap = await admin.database().ref(`shopifyProductCosts/${userId}`).once('value');
     const costs = costsSnap.val() || {};
-    // Her ürüne cost ekle
-    const productsWithCost = products.map((p: any) => ({
-      ...p,
-      cost: costs[p.id] || ""
-    }));
+    // Her ürüne cost ekle: önce Shopify inventory cost'larından türet, yoksa manuel kayıtlı cost'u kullan
+    const productsWithCost = products.map((p: any) => {
+      const variants = Array.isArray(p?.variants) ? p.variants : [];
+      const variantCosts: number[] = [];
+      for (const v of variants) {
+        const idStr = String(v?.inventory_item_id ?? '');
+        const c = idStr ? invCostMap[idStr] : undefined;
+        if (typeof c === 'number' && Number.isFinite(c) && c > 0) variantCosts.push(c);
+      }
+      const shopifyAvgCost = variantCosts.length ? (variantCosts.reduce((a, b) => a + b, 0) / variantCosts.length) : undefined;
+      const manualCostRaw = costs[p.id];
+      const manualCost = manualCostRaw !== undefined && manualCostRaw !== null && String(manualCostRaw).length > 0 ? manualCostRaw : "";
+      const hasShopifyCost = typeof shopifyAvgCost === 'number' && Number.isFinite(shopifyAvgCost) && shopifyAvgCost > 0;
+      return {
+        ...p,
+        cost: hasShopifyCost ? Number(shopifyAvgCost.toFixed(2)) : manualCost,
+        costSource: hasShopifyCost ? 'shopify' : (manualCost ? 'manual' : undefined),
+      };
+    });
     res.json({ products: productsWithCost });
   } catch (error: any) {
     const msg = error?.response?.data || (error instanceof Error ? error.message : String(error));
