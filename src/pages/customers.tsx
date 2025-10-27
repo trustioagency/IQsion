@@ -40,12 +40,23 @@ export default function CustomersPage() {
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Dashboard Metrics
+  // Real metrics query
+  const metricsQuery = useQuery<{ requestedRange: any; totals: { totalCustomers: number; avgLTV: number; avgOrdersPerCustomer: number; cac: number; adSpend: number; currency: string } } | null>({
+    queryKey: ['customers-metrics', uid],
+    enabled: !!uid,
+    queryFn: async () => {
+      const res = await fetch(`/api/customers/metrics?userId=${encodeURIComponent(uid!)}`, { credentials: 'include' });
+      if (!res.ok) return null;
+      return res.json();
+    }
+  });
+
+  // Dashboard Metrics (from API)
   const dashboardMetrics = {
-    totalCustomers: 12450,
-    avgLTV: 5250,
-    avgCAC: 185,
-    customerGrowth: 12.5
+    totalCustomers: metricsQuery.data?.totals?.totalCustomers ?? 0,
+    avgLTV: metricsQuery.data?.totals?.avgLTV ?? 0,
+    avgCAC: metricsQuery.data?.totals?.cac ?? 0,
+    avgOrdersPerCustomer: metricsQuery.data?.totals?.avgOrdersPerCustomer ?? 0,
   };
 
   // Saved Segments
@@ -361,7 +372,7 @@ export default function CustomersPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-slate-400 text-sm">Toplam Müşteri Sayısı</p>
-                          <p className="text-2xl font-bold text-white">{dashboardMetrics.totalCustomers.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-white">{metricsQuery.isLoading ? '—' : dashboardMetrics.totalCustomers.toLocaleString()}</p>
                         </div>
                         <Users className="w-8 h-8 text-blue-400" />
                       </div>
@@ -373,7 +384,7 @@ export default function CustomersPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-slate-400 text-sm">Ortalama Müşteri LTV</p>
-                          <p className="text-2xl font-bold text-white">₺{dashboardMetrics.avgLTV.toLocaleString()}</p>
+                          <p className="text-2xl font-bold text-white">{metricsQuery.isLoading ? '—' : `₺${dashboardMetrics.avgLTV.toLocaleString('tr-TR')}`}</p>
                         </div>
                         <DollarSign className="w-8 h-8 text-green-400" />
                       </div>
@@ -385,7 +396,7 @@ export default function CustomersPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-slate-400 text-sm">Müşteri Edinme Maliyeti</p>
-                          <p className="text-2xl font-bold text-white">₺{dashboardMetrics.avgCAC}</p>
+                          <p className="text-2xl font-bold text-white">{metricsQuery.isLoading ? '—' : `₺${dashboardMetrics.avgCAC.toLocaleString('tr-TR')}`}</p>
                         </div>
                         <TrendingUp className="w-8 h-8 text-orange-400" />
                       </div>
@@ -396,8 +407,8 @@ export default function CustomersPage() {
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-slate-400 text-sm">Müşteri Artışı</p>
-                          <p className="text-2xl font-bold text-green-400">+{dashboardMetrics.customerGrowth}%</p>
+                          <p className="text-slate-400 text-sm">Ortalama Sipariş / Müşteri</p>
+                          <p className="text-2xl font-bold text-green-400">{metricsQuery.isLoading ? '—' : dashboardMetrics.avgOrdersPerCustomer.toFixed(2)}</p>
                         </div>
                         <LineChart className="w-8 h-8 text-purple-400" />
                       </div>

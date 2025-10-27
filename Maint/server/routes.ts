@@ -385,6 +385,111 @@ router.get('/api/shopify/customers', async (req, res) => {
   }
 });
 
+// Customers metrics: total customers, avg LTV, avg orders/customer, CAC
+router.get('/api/customers/metrics', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    // Optional date range for ad spend (defaults last 30 days, till yesterday)
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+    // Shopify connection
+    const snap = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+    const conn = snap.val();
+    if (!conn?.storeUrl || !conn?.accessToken) {
+      return res.json({
+        requestedRange: { startDate: since, endDate: until },
+        totals: { totalCustomers: 0, avgLTV: 0, avgOrdersPerCustomer: 0, cac: 0, adSpend: 0, currency: 'TRY' }
+      });
+    }
+
+    // 1) Total customers via count endpoint
+    let totalCustomers = 0;
+    try {
+      const countRes = await axios.get(`https://${conn.storeUrl}/admin/api/2025-01/customers/count.json`, {
+        headers: { 'X-Shopify-Access-Token': conn.accessToken }
+      });
+      totalCustomers = Number(countRes.data?.count || 0);
+    } catch (e) {
+      totalCustomers = 0;
+    }
+
+    // 2) Iterate all customers to compute sums (LTV and orders)
+    let sumTotalSpent = 0;
+    let sumOrders = 0;
+    let fetched = 0;
+    let nextUrl: string | null = `https://${conn.storeUrl}/admin/api/2025-01/customers.json?limit=250&fields=id,total_spent,orders_count,created_at`;
+    let safety = 0;
+    while (nextUrl && safety < 100) {
+      safety++;
+      const r = await axios.get(nextUrl, { headers: { 'X-Shopify-Access-Token': conn.accessToken } });
+      const customers: any[] = r.data?.customers || [];
+      for (const c of customers) {
+        const spent = Number.parseFloat(String(c?.total_spent ?? '0')) || 0;
+        const orders = Number(c?.orders_count || 0);
+        sumTotalSpent += spent;
+        sumOrders += orders;
+      }
+      fetched += customers.length;
+      const link = (r.headers?.link || r.headers?.Link) as string | undefined;
+      if (link && /<([^>]+)>; rel="next"/i.test(link)) {
+        const m = link.match(/<([^>]+)>; rel="next"/i);
+        nextUrl = m ? m[1] : null;
+      } else {
+        nextUrl = null;
+      }
+      // If count is known and we've fetched all, break early
+      if (totalCustomers && fetched >= totalCustomers) break;
+    }
+
+    const avgLTV = totalCustomers > 0 ? (sumTotalSpent / totalCustomers) : 0;
+    const avgOrdersPerCustomer = totalCustomers > 0 ? (sumOrders / totalCustomers) : 0;
+
+    // 3) Ad spend from existing endpoints (Meta + Google Ads) for the period
+    let adSpend = 0;
+    try {
+      const baseProto = (req.protocol || 'http');
+      const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1', 'localhost');
+      const baseUrl = `${baseProto}://${host}`;
+      const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(since)}&endDate=${encodeURIComponent(until)}`;
+      const [metaRes, gadsRes] = await Promise.allSettled([
+        fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+      ]);
+      const getSpend = async (r: any) => {
+        if (r.status !== 'fulfilled') return 0;
+        const res = r.value as Response;
+        if (!res.ok) return 0;
+        const json: any = await res.json();
+        return Number(json?.totals?.spend || 0);
+      };
+      adSpend += await getSpend(metaRes);
+      adSpend += await getSpend(gadsRes);
+    } catch (_) {}
+
+    const cac = totalCustomers > 0 ? (adSpend / totalCustomers) : 0;
+
+    return res.json({
+      requestedRange: { startDate: since, endDate: until },
+      totals: {
+        totalCustomers,
+        avgLTV: Number(avgLTV.toFixed(2)),
+        avgOrdersPerCustomer: Number(avgOrdersPerCustomer.toFixed(2)),
+        cac: Number(cac.toFixed(2)),
+        adSpend: Number(adSpend.toFixed(2)),
+        currency: 'TRY',
+      }
+    });
+  } catch (error) {
+    console.error('[CUSTOMERS METRICS ERROR]', error);
+    return res.status(500).json({ message: 'Müşteri metrikleri hesaplanamadı', error: String(error) });
+  }
+});
+
 // Shopify access scopes görüntüleme (teşhis amaçlı)
 router.get('/api/shopify/access-scopes', async (req, res) => {
   try {
@@ -504,6 +609,219 @@ router.get('/api/shopify/summary', async (req, res) => {
   } catch (error) {
     console.error('[Shopify SUMMARY ERROR]', error);
     return res.status(500).json({ message: 'Shopify özet verisi çekilemedi', error: String(error) });
+  }
+});
+
+// Profitability summary: revenue, COGS, gross/net profit, margin, ROAS (best-effort)
+router.get('/api/profitability/summary', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const revenueMode = (typeof req.query.revenueMode === 'string' ? req.query.revenueMode : 'gross') as 'paid' | 'gross';
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+    // Get Shopify connection
+    const shopSnap = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+    const shopConn = shopSnap.val();
+    if (!shopConn?.storeUrl || !shopConn?.accessToken) {
+      return res.status(200).json({
+        requestedRange: { startDate: since, endDate: until },
+        currency: 'TRY',
+        rows: [],
+        totals: { revenue: 0, cogs: 0, grossProfit: 0, netProfit: 0, margin: 0, adSpend: 0, roas: null }
+      });
+    }
+
+    // Fetch all orders with line_items in range
+    const base = `https://${shopConn.storeUrl}/admin/api/2025-01/orders.json`;
+    const params = new URLSearchParams();
+    params.set('status', 'any');
+    params.set('limit', '250');
+    params.set('created_at_min', `${since}T00:00:00Z`);
+    params.set('created_at_max', `${until}T23:59:59Z`);
+    // include necessary fields; omit fields filter to ensure line_items are included
+
+    let nextUrl: string | null = `${base}?${params.toString()}`;
+    const orders: any[] = [];
+    let currency: string | null = null;
+    let safety = 0;
+    while (nextUrl && safety < 50) {
+      safety++;
+      const r = await fetchWithTimeout(nextUrl, {
+        method: 'GET',
+        headers: { 'X-Shopify-Access-Token': shopConn.accessToken, 'Content-Type': 'application/json' },
+      }, 20000);
+      const json: any = await r.json();
+      if (!r.ok) return res.status(r.status).json({ message: 'Shopify orders alınamadı', error: json });
+      const chunk: any[] = json.orders || [];
+      for (const o of chunk) {
+        if (!currency && o.currency) currency = o.currency;
+        orders.push(o);
+      }
+      const link = (r as any).headers?.get ? (r as any).headers.get('link') : undefined;
+      if (link && /<([^>]+)>; rel="next"/i.test(link)) {
+        const m = link.match(/<([^>]+)>; rel="next"/i);
+        nextUrl = m ? m[1] : null;
+      } else {
+        nextUrl = null;
+      }
+    }
+
+    // Collect variant_ids to map inventory_item_id
+    const variantIds = new Set<string>();
+    for (const o of orders) {
+      const items = Array.isArray(o?.line_items) ? o.line_items : [];
+      for (const li of items) {
+        if (li && li.variant_id) variantIds.add(String(li.variant_id));
+      }
+    }
+    const vIdList = Array.from(variantIds);
+    const chunker = <T,>(arr: T[], size = 250): T[][] => {
+      const res: T[][] = [];
+      for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+      return res;
+    };
+    const vChunks = chunker(vIdList, 250);
+    const variantToInv: Record<string, string> = {};
+    for (const ch of vChunks) {
+      if (!ch.length) continue;
+      const vRes = await axios.get(`https://${shopConn.storeUrl}/admin/api/2025-01/variants.json`, {
+        params: { ids: ch.join(',') },
+        headers: { 'X-Shopify-Access-Token': shopConn.accessToken }
+      });
+      const variants = vRes.data?.variants || [];
+      for (const v of variants) {
+        if (v?.id && v?.inventory_item_id) variantToInv[String(v.id)] = String(v.inventory_item_id);
+      }
+    }
+
+    // Fetch inventory items to get cost
+    const invIds = Array.from(new Set(Object.values(variantToInv)));
+    const invChunks = chunker(invIds, 250);
+    const invCostMap: Record<string, number> = {};
+    for (const ch of invChunks) {
+      if (!ch.length) continue;
+      const invRes = await axios.get(`https://${shopConn.storeUrl}/admin/api/2025-01/inventory_items.json`, {
+        params: { ids: ch.join(',') },
+        headers: { 'X-Shopify-Access-Token': shopConn.accessToken }
+      });
+      const items = invRes.data?.inventory_items || [];
+      for (const it of items) {
+        const costNum = Number(it?.cost);
+        if (Number.isFinite(costNum) && costNum > 0) invCostMap[String(it.id)] = costNum;
+      }
+    }
+
+    // Manual costs by product id
+    const manualCostsSnap = await admin.database().ref(`shopifyProductCosts/${userId}`).once('value');
+    const manualCosts = manualCostsSnap.val() || {};
+
+    // Build daily aggregates
+    type DayAgg = { revenueGross: number; revenuePaid: number; cogs: number };
+    const dayMap: Record<string, DayAgg> = {};
+    for (const o of orders) {
+      if (o?.cancelled_at) continue; // skip cancelled
+      const date = String(o?.created_at || '').slice(0, 10);
+      const fs = String(o?.financial_status || '').toLowerCase();
+      const price = Number.parseFloat(String(o?.total_price || o?.subtotal_price || '0')) || 0;
+      if (!dayMap[date]) dayMap[date] = { revenueGross: 0, revenuePaid: 0, cogs: 0 };
+      dayMap[date].revenueGross += price;
+      if (['paid','partially_paid','partially_refunded'].includes(fs)) dayMap[date].revenuePaid += price;
+      // COGS from line items
+      const items = Array.isArray(o?.line_items) ? o.line_items : [];
+      for (const li of items) {
+        const qty = Number(li?.quantity || 0);
+        if (!qty) continue;
+        const variantId = li?.variant_id ? String(li.variant_id) : '';
+        const invId = variantId ? variantToInv[variantId] : undefined;
+        let unitCost: number | null = null;
+        if (invId && invCostMap[invId] !== undefined) {
+          unitCost = invCostMap[invId];
+        } else if (li?.product_id && manualCosts[li.product_id] !== undefined) {
+          const m = Number(manualCosts[li.product_id]);
+          if (Number.isFinite(m) && m >= 0) unitCost = m;
+        }
+        if (unitCost !== null) dayMap[date].cogs += unitCost * qty;
+      }
+    }
+
+    // Build rows (zero-filled)
+    const rows: Array<{ date: string; revenue: number; cogs: number; grossProfit: number; netProfit: number }> = [];
+    const cur = new Date(since as string);
+    const end = new Date(until as string);
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0, 10);
+      const v = dayMap[key] || { revenueGross: 0, revenuePaid: 0, cogs: 0 };
+      const revenue = revenueMode === 'paid' ? v.revenuePaid : v.revenueGross;
+      const cogs = v.cogs;
+      const gross = revenue - cogs;
+      rows.push({ date: key, revenue: Number(revenue.toFixed(2)), cogs: Number(cogs.toFixed(2)), grossProfit: Number(gross.toFixed(2)), netProfit: 0 });
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const totals = rows.reduce((acc, r) => {
+      acc.revenue += r.revenue; acc.cogs += r.cogs; acc.grossProfit += r.grossProfit; return acc;
+    }, { revenue: 0, cogs: 0, grossProfit: 0 });
+
+    // Fetch ad spends (best-effort) from existing endpoints
+    let adSpend = 0;
+    try {
+      const baseProto = (req.protocol || 'http');
+      const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1', 'localhost');
+      const baseUrl = `${baseProto}://${host}`;
+      const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(since)}&endDate=${encodeURIComponent(until)}`;
+      const [metaRes, gadsRes] = await Promise.allSettled([
+        fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+      ]);
+      const getSpend = async (r: any) => {
+        if (r.status !== 'fulfilled') return 0;
+        const res = r.value as Response;
+        if (!res.ok) return 0;
+        const json: any = await res.json();
+        return Number(json?.totals?.spend || 0);
+      };
+      adSpend += await getSpend(metaRes);
+      adSpend += await getSpend(gadsRes);
+    } catch (_) {}
+
+    // Compute net profit and ROAS
+    const grossProfitTotal = totals.grossProfit;
+    const netProfitTotal = totals.revenue - totals.cogs - adSpend;
+    const margin = totals.revenue > 0 ? (netProfitTotal / totals.revenue) * 100 : 0;
+    const roas = adSpend > 0 ? (totals.revenue / adSpend) : null;
+
+    // Distribute daily net profit assuming even ad spend per day proportionate to revenue
+    const totalRevenue = totals.revenue || 1;
+    const dailyRows = rows.map(r => {
+      const share = r.revenue / totalRevenue;
+      const dailyAdSpend = adSpend * share;
+      const net = r.grossProfit - dailyAdSpend;
+      return { ...r, netProfit: Number(net.toFixed(2)) };
+    });
+
+    return res.json({
+      requestedRange: { startDate: since, endDate: until },
+      currency: currency || 'TRY',
+      rows: dailyRows,
+      totals: {
+        revenue: Number(totals.revenue.toFixed(2)),
+        cogs: Number(totals.cogs.toFixed(2)),
+        grossProfit: Number(grossProfitTotal.toFixed(2)),
+        netProfit: Number(netProfitTotal.toFixed(2)),
+        margin: Number(margin.toFixed(2)),
+        adSpend: Number(adSpend.toFixed(2)),
+        roas: roas === null ? null : Number(roas.toFixed(2)),
+        revenueMode,
+      }
+    });
+  } catch (error) {
+    console.error('[PROFITABILITY SUMMARY ERROR]', error);
+    return res.status(500).json({ message: 'Karlılık özeti hesaplanamadı', error: String(error) });
   }
 });
 
