@@ -1,5 +1,6 @@
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -15,10 +16,27 @@ import {
   DollarSign, ShoppingCart, Clock,
   Filter, Download, Settings
 } from "lucide-react";
+import { useAuth } from "../hooks/useAuth";
+
+type ShopifyCustomer = {
+  id: number | string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  orders_count?: number;
+  total_spent?: string;
+  created_at?: string;
+  state?: string;
+  default_address?: { city?: string; country?: string } | null;
+};
 
 export default function CustomersPage() {
+  const { user } = useAuth();
+  const uid = (user as any)?.uid || (user as any)?.id;
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -746,7 +764,124 @@ export default function CustomersPage() {
               </TabsContent>
             </Tabs>
 
+            {/* Shopify Müşteri Listesi */}
+            <Card className="bg-slate-800 border-slate-700">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-white">Shopify Müşterileri</CardTitle>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
+                    <Input
+                      placeholder="Müşteri ara..."
+                      value={customerSearch}
+                      onChange={(e) => setCustomerSearch(e.target.value)}
+                      className="pl-10 bg-slate-700 border-slate-600 text-slate-200 w-64"
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CustomersTable uid={uid} searchTerm={customerSearch} />
+              </CardContent>
+            </Card>
+
       {showCreateModal && <CreateSegmentModal />}
+    </div>
+  );
+}
+
+function CustomersTable({ uid, searchTerm }: { uid?: string; searchTerm: string }) {
+  const { data, isLoading, error } = useQuery<{ customers: ShopifyCustomer[] } | any>({
+    queryKey: ['shopify-customers', uid],
+    enabled: !!uid,
+    queryFn: async () => {
+      const res = await fetch(`/api/shopify/customers?userId=${encodeURIComponent(uid!)}`, { credentials: 'include' });
+      if (!res.ok) return null;
+      return res.json();
+    }
+  });
+
+  const customers: ShopifyCustomer[] = (data?.customers || []) as ShopifyCustomer[];
+  const filtered = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    const list = customers.map(c => ({
+      ...c,
+      _name: `${c.first_name || ''} ${c.last_name || ''}`.trim(),
+    }));
+    const out = list.filter(c => {
+      if (!term) return true;
+      return (
+        c._name.toLowerCase().includes(term) ||
+        (c.email || '').toLowerCase().includes(term) ||
+        (c.phone || '').toLowerCase().includes(term)
+      );
+    });
+    // Sort by created_at desc
+    out.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    return out;
+  }, [customers, searchTerm]);
+
+  if (!uid) {
+    return <div className="text-slate-400 text-sm">Giriş yapın veya test modunu kullanın.</div>;
+  }
+  if (isLoading) {
+    return <div className="text-slate-400 text-sm">Müşteriler yükleniyor...</div>;
+  }
+  if (error) {
+    return <div className="text-red-400 text-sm">Müşteriler alınamadı.</div>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-slate-700">
+            <th className="text-left py-3 px-4 text-slate-300">Müşteri</th>
+            <th className="text-left py-3 px-4 text-slate-300">E-posta</th>
+            <th className="text-left py-3 px-4 text-slate-300">Telefon</th>
+            <th className="text-left py-3 px-4 text-slate-300">Konum</th>
+            <th className="text-right py-3 px-4 text-slate-300">Sipariş</th>
+            <th className="text-right py-3 px-4 text-slate-300">Toplam Harcama</th>
+            <th className="text-left py-3 px-4 text-slate-300">Kayıt</th>
+            <th className="text-left py-3 px-4 text-slate-300">Durum</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((c) => {
+            const name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || (c.email || '—');
+            const loc = c.default_address ? [c.default_address.city, c.default_address.country].filter(Boolean).join(', ') : '—';
+            const spent = Number.parseFloat(String(c.total_spent || '0')) || 0;
+            const created = c.created_at ? new Date(c.created_at).toLocaleDateString('tr-TR') : '';
+            const orders = Number(c.orders_count || 0);
+            return (
+              <tr key={String(c.id)} className="border-b border-slate-700/50 hover:bg-slate-700/30">
+                <td className="py-3 px-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-slate-600 text-slate-300 flex items-center justify-center text-xs">
+                      {name.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}
+                    </div>
+                    <div className="text-white font-medium">{name}</div>
+                  </div>
+                </td>
+                <td className="py-3 px-4 text-slate-300">{c.email || '—'}</td>
+                <td className="py-3 px-4 text-slate-300">{c.phone || '—'}</td>
+                <td className="py-3 px-4 text-slate-300">{loc || '—'}</td>
+                <td className="py-3 px-4 text-right text-white">{orders}</td>
+                <td className="py-3 px-4 text-right text-white">₺{spent.toLocaleString('tr-TR')}</td>
+                <td className="py-3 px-4 text-slate-300">{created}</td>
+                <td className="py-3 px-4">
+                  <Badge variant="secondary" className="bg-slate-700 text-slate-300">{c.state || '—'}</Badge>
+                </td>
+              </tr>
+            );
+          })}
+          {!filtered.length && (
+            <tr>
+              <td colSpan={8} className="py-6 px-4 text-slate-400 text-sm">Müşteri bulunamadı.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
