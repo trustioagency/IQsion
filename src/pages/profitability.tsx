@@ -1,5 +1,6 @@
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -14,6 +15,14 @@ import {
 } from "lucide-react";
 import AIChatPanel from "../components/ai-chat-panel";
 import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useAuth } from "../hooks/useAuth";
+
+type ProfitabilitySummary = {
+  requestedRange: { startDate: string; endDate: string };
+  currency: string;
+  rows: Array<{ date: string; revenue: number; cogs: number; grossProfit: number; netProfit: number }>;
+  totals: { revenue: number; cogs: number; grossProfit: number; netProfit: number; margin: number; adSpend: number; roas: number | null; revenueMode: 'gross'|'paid' };
+};
 
 export default function Profitability() {
   const [timeRange, setTimeRange] = useState('30d');
@@ -23,20 +32,55 @@ export default function Profitability() {
   const [showComparison, setShowComparison] = useState(false);
   const [comparisonPeriod, setComparisonPeriod] = useState('previous');
 
-  const profitabilityMetrics = [
-    { title: 'Net Kar (Cebine Kalan)', value: '₺95,670', change: '+12.5%', trend: 'up', color: 'green' },
-    { title: 'Brüt Kar', value: '₺220,450', change: '+8.3%', trend: 'up', color: 'blue' },
-    { title: 'Kar Marjı', value: '%21.2', change: '+1.8%', trend: 'up', color: 'purple' },
-    { title: 'ROAS', value: '4.2x', change: '+0.3x', trend: 'up', color: 'orange' }
-  ];
+  const { user } = useAuth();
+  const uid = (user as any)?.uid || (user as any)?.id;
 
-  const profitabilityTrendData = [
-    { date: '1 Oca', netProfit: 82500, grossProfit: 198000, revenue: 425000 },
-    { date: '8 Oca', netProfit: 87200, grossProfit: 205600, revenue: 445000 },
-    { date: '15 Oca', netProfit: 91800, grossProfit: 215400, revenue: 465000 },
-    { date: '22 Oca', netProfit: 89400, grossProfit: 208800, revenue: 452000 },
-    { date: '29 Oca', netProfit: 95670, grossProfit: 220450, revenue: 485000 },
-  ];
+  const makeRange = (key: string) => {
+    const today = new Date();
+    const end = new Date(today);
+    end.setDate(today.getDate() - 1);
+    const start = new Date(end);
+    const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 29;
+    start.setDate(end.getDate() - days);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { startDate: fmt(start), endDate: fmt(end) };
+  };
+
+  const { data: profitData } = useQuery<ProfitabilitySummary | null>({
+    queryKey: ['profitability', uid, timeRange],
+    enabled: !!uid,
+    queryFn: async () => {
+      const { startDate, endDate } = makeRange(timeRange);
+      const url = new URL('/api/profitability/summary', window.location.origin);
+      url.searchParams.set('userId', uid);
+      url.searchParams.set('startDate', startDate);
+      url.searchParams.set('endDate', endDate);
+      url.searchParams.set('revenueMode', 'gross');
+      const res = await fetch(url.toString(), { credentials: 'include' });
+      if (!res.ok) return null;
+      return res.json();
+    }
+  });
+
+  const fmtTRY = (n: number) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n || 0);
+  const totals = profitData?.totals;
+  const profitabilityMetrics = useMemo(() => {
+    const revenue = totals ? fmtTRY(totals.revenue) : '₺0';
+    const gross = totals ? fmtTRY(totals.grossProfit) : '₺0';
+    const net = totals ? fmtTRY(totals.netProfit) : '₺0';
+    const roasStr = totals ? (totals.roas === null ? '—' : `${(totals.roas || 0).toFixed(1)}x`) : '—';
+    return [
+      { title: 'Gelir', value: revenue, color: 'purple' },
+      { title: 'Brüt Kar', value: gross, color: 'blue' },
+      { title: 'Net Kar (Cebine Kalan)', value: net, color: 'green' },
+      { title: 'ROAS', value: roasStr, color: 'orange' }
+    ];
+  }, [totals]);
+
+  const profitabilityTrendData = useMemo(() => {
+    const rows = profitData?.rows || [];
+    return rows.map(r => ({ date: r.date, netProfit: r.netProfit, grossProfit: r.grossProfit, revenue: r.revenue }));
+  }, [profitData]);
 
   const channelOptions = [
     { value: 'all', label: 'Tüm Kanallar' },
@@ -196,15 +240,13 @@ export default function Profitability() {
                       <div className={`w-12 h-12 bg-${metric.color}-500/20 rounded-xl flex items-center justify-center`}>
                         <DollarSign className={`w-6 h-6 text-${metric.color}-500`} />
                       </div>
-                      <Badge 
-                        variant="secondary" 
-                        className={`${metric.trend === 'up' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}
-                      >
-                        {metric.change}
-                      </Badge>
+                      {/* Optional change badge hidden for now */}
                     </div>
                     <h4 className="text-slate-400 text-sm mb-2">{metric.title}</h4>
                     <p className="text-2xl font-bold text-white">{metric.value}</p>
+                    {metric.title.startsWith('Net Kar') && totals && (
+                      <p className="text-sm text-slate-400 mt-1">Marj: %{(totals.margin || 0).toFixed(1)}</p>
+                    )}
                     {showComparison && (
                       <p className="text-sm text-slate-400 mt-1">Önceki döneme göre</p>
                     )}
