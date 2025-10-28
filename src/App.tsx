@@ -64,7 +64,7 @@ function Router() {
     <div className="flex h-screen bg-slate-900 text-slate-300">
       <Sidebar />
       <div className="flex flex-col flex-1 w-full min-w-0 overflow-hidden">
-        <Header currentPage="Dashboard" />
+  <Header />
         <main className="flex-1 overflow-y-auto bg-slate-800/50 p-6">
           <Suspense fallback={<div className="text-white">Loading...</div>}>
             <Switch>

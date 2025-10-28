@@ -20,18 +20,22 @@ export const LanguageSwitcher = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-gray-600 hover:text-gray-900 border border-gray-200 hover:border-gray-300">
-          <Globe className="w-4 h-4 mr-2" />
-          {languages.find(lang => lang.code === language)?.flag}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-slate-700/50 h-9 w-9"
+          aria-label="Language"
+        >
+          <Globe className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="bg-white border-gray-200">
+      <DropdownMenuContent align="end" className="bg-slate-800 border border-slate-700 min-w-[180px]">
         {languages.map((lang) => (
           <DropdownMenuItem
             key={lang.code}
             onClick={() => setLanguage(lang.code as 'tr' | 'en')}
-            className={`text-gray-700 hover:bg-gray-100 cursor-pointer ${
-              language === lang.code ? 'bg-gray-100 text-gray-900' : ''
+            className={`text-slate-300 hover:bg-slate-700 cursor-pointer ${
+              language === lang.code ? 'bg-slate-700 text-white' : ''
             }`}
           >
             <span className="mr-2">{lang.flag}</span>

@@ -38,9 +38,12 @@ interface AIChatPanelProps {
   pageContext: string;
   insights?: AIInsight[];
   suggestions?: string[];
+  title?: string; // optional UI title override
+  variant?: 'full' | 'minimal'; // minimal hides insights/suggestions and uses compact layout
+  className?: string; // optional extra wrapper classes
 }
 
-export default function AIChatPanel({ pageContext, insights = [], suggestions = [] }: AIChatPanelProps) {
+export default function AIChatPanel({ pageContext, insights = [], suggestions = [], title, variant = 'full', className }: AIChatPanelProps) {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     {
       id: '1',
@@ -114,20 +117,26 @@ export default function AIChatPanel({ pageContext, insights = [], suggestions = 
     }
   };
 
+  const isMinimal = variant === 'minimal';
+  const wrapperBase = isMinimal ? 'mx-auto max-w-3xl bg-slate-900/60' : 'bg-slate-800/60';
+  const cardClasses = `${wrapperBase} border-slate-700/50 backdrop-blur-sm ${className || ''}`;
+
   return (
-    <Card className="bg-slate-800/60 border-slate-700/50 backdrop-blur-sm">
+    <Card className={cardClasses}>
       <CardHeader>
         <CardTitle className="text-white flex items-center gap-2">
           <Bot className="w-5 h-5 text-blue-400" />
-          AI Stratejist
+          {title || 'AI Stratejist'}
           <Badge variant="secondary" className="bg-blue-500/20 text-blue-300">Beta</Badge>
         </CardTitle>
-        <p className="text-slate-400 text-sm">Otomatik içgörüler ve interaktif sohbet</p>
+        {!isMinimal && (
+          <p className="text-slate-400 text-sm">Otomatik içgörüler ve interaktif sohbet</p>
+        )}
       </CardHeader>
       <CardContent className="space-y-6">
         
         {/* AI Insights */}
-        {insights.length > 0 && (
+        {!isMinimal && insights.length > 0 && (
           <div className="space-y-4">
             <h4 className="text-white font-semibold flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-yellow-400" />
@@ -167,7 +176,7 @@ export default function AIChatPanel({ pageContext, insights = [], suggestions = 
         )}
 
         {/* Quick Suggestions */}
-        {suggestions.length > 0 && (
+        {!isMinimal && suggestions.length > 0 && (
           <div className="space-y-3">
             <h4 className="text-white font-semibold text-sm">Hızlı Sorular</h4>
             <div className="flex flex-wrap gap-2">
@@ -188,13 +197,15 @@ export default function AIChatPanel({ pageContext, insights = [], suggestions = 
 
         {/* Chat Interface */}
         <div className="space-y-4">
-          <h4 className="text-white font-semibold flex items-center gap-2">
-            <MessageCircle className="w-4 h-4" />
-            AI Danışman
-          </h4>
+          {!isMinimal && (
+            <h4 className="text-white font-semibold flex items-center gap-2">
+              <MessageCircle className="w-4 h-4" />
+              AI Danışman
+            </h4>
+          )}
           
           <div className="bg-slate-700/30 rounded-lg">
-            <ScrollArea className="h-64 p-4">
+            <ScrollArea className={`${isMinimal ? 'h-56' : 'h-64'} p-4`}>
               <div className="space-y-3">
                 {chatHistory.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -230,7 +241,7 @@ export default function AIChatPanel({ pageContext, insights = [], suggestions = 
             <div className="p-4 border-t border-slate-600">
               <div className="flex gap-2">
                 <Input
-                  placeholder="Sorunuzu yazın..."
+                  placeholder={isMinimal ? 'IQsion AI ile sor, hızlı aksiyon al…' : 'Sorunuzu yazın...'}
                   value={currentMessage}
                   onChange={(e) => setCurrentMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}

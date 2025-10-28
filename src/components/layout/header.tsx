@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
 import { 
@@ -9,16 +9,16 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Badge } from "../ui/badge";
-import { Bell, Search, User, Settings, LogOut, Globe, Menu } from "lucide-react";
+import { Bell, User, Settings, LogOut } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
-import { type User as UserType } from "@shared/schema";
+import { type User as UserType } from "../../types/user";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { Input } from '../ui/input';
+import { useLocation } from "wouter";
 
 interface HeaderProps {
-  currentPage: string;
+  currentPage?: string;
 }
 
 export default function Header({ currentPage }: HeaderProps) {
@@ -26,8 +26,39 @@ export default function Header({ currentPage }: HeaderProps) {
   const { t } = useLanguage();
   const isMobile = useIsMobile();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [location, navigate] = useLocation();
 
   const handleLogout = logout;
+
+  const pageTitle = useMemo(() => {
+    if (currentPage) return currentPage;
+    const path = location || '/dashboard';
+  const map: Record<string, string> = {
+      '/': 'Dashboard',
+      '/dashboard': 'Dashboard',
+      '/market-analysis': 'Market Analysis',
+      '/competitor-analysis': 'Competitor Analysis',
+      '/attribution': 'Attribution',
+      '/profitability': 'Profitability',
+      '/kpi-analysis': 'KPI Analysis',
+      '/touchpoint-analysis': 'Touchpoint Analysis',
+      '/customers': 'Customers',
+      '/products': 'Products',
+      '/campaigns': 'Campaigns',
+      '/collaborations': 'Collaborations',
+      '/strategy': 'Strategy',
+      '/creative': 'Creative',
+      '/reports': 'Reports',
+      '/opportunities': 'Opportunities',
+      '/scenarios': 'Scenarios',
+      '/ai-assistant': 'AI Assistant',
+      '/autopilot': 'Autopilot',
+      '/team': 'Team',
+      '/settings': t('settings'),
+    };
+    const found = Object.keys(map).find(k => path === k || (k !== '/' && path.startsWith(k)));
+    return (found ? map[found] : 'Dashboard');
+  }, [location, currentPage, t]);
 
 
 
@@ -38,41 +69,26 @@ export default function Header({ currentPage }: HeaderProps) {
         {/* Left side - Page title and breadcrumb */}
         <div className="flex items-center gap-4">
           <div>
-            <h1 className="text-xl font-bold text-white">{currentPage}</h1>
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <span>Pazarlama Zekası</span>
-              <span>/</span>
-              <span>{currentPage}</span>
+            <h1 className="text-xl font-bold text-white">{pageTitle}</h1>
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <button onClick={() => navigate('/dashboard')} className="hover:text-white transition-colors">IQsion</button>
+              <span className="text-slate-500">/</span>
+              <span className="text-slate-300">{pageTitle}</span>
             </div>
           </div>
         </div>
 
-        {/* Right side - Search, notifications, language, user menu */}
-        <div className="flex items-center gap-4">
-
-          {/* Search */}
-          <div className="hidden md:flex items-center gap-2 bg-slate-700 rounded-lg px-3 py-2 min-w-[300px]">
-            <Search className="w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder={t('search') + "..."}
-              className="bg-transparent text-slate-300 placeholder-slate-400 outline-none flex-1 text-sm"
-            />
-          </div>
-
+        {/* Right side - language, notifications, user menu */}
+        <div className="flex items-center gap-2">
           {/* Language Toggle */}
           <LanguageSwitcher />
 
           {/* Notifications */}
           <div className="relative">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-slate-400 hover:text-white p-2"
-            >
+            <Button variant="ghost" size="icon" className="text-slate-300 hover:text-white p-2 relative">
               <Bell className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full border border-red-400 shadow">3</span>
             </Button>
-            <div className="notification-badge">3</div>
           </div>
 
           {/* User Menu */}
@@ -128,12 +144,18 @@ export default function Header({ currentPage }: HeaderProps) {
 
               <DropdownMenuSeparator className="bg-slate-700" />
 
-              <DropdownMenuItem className="text-slate-300 hover:text-white hover:bg-slate-700">
+              <DropdownMenuItem 
+                onClick={() => navigate('/settings')}
+                className="text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+              >
                 <User className="w-4 h-4 mr-2" />
-                Profile
+                {t('profile')}
               </DropdownMenuItem>
 
-              <DropdownMenuItem className="text-slate-300 hover:text-white hover:bg-slate-700">
+              <DropdownMenuItem 
+                onClick={() => navigate('/settings')}
+                className="text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+              >
                 <Settings className="w-4 h-4 mr-2" />
                 {t('settings')}
               </DropdownMenuItem>

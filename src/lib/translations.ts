@@ -11,6 +11,8 @@ export const translations = {
     login: "Giriş",
     startFree: "Ücretsiz Başla",
     testMode: "Test Modu",
+    profile: "Profil",
+    settings: "Ayarlar",
     
     // Hero
     heroTitle: "E-ticaret İşletmeniz İçin",
@@ -96,6 +98,24 @@ export const translations = {
   impressions: "Gösterimler",
   clicks: "Tıklamalar",
   ctr: "CTR",
+  cpc: "TBM (CPC)",
+  cpm: "BGBM (CPM)",
+  metaAds: "Meta Ads",
+  googleAds: "Google Ads",
+  newUsers: "Yeni Kullanıcılar",
+  activeUsers: "Aktif Kullanıcılar",
+
+  // CEO KPIs
+  netProfit: "Net Kâr",
+  grossProfit: "Brüt Kâr",
+  profitMargin: "Kâr Marjı",
+
+  // Pie selectors
+  revenueVsAdSpend: "Gelir vs Reklam Harcaması",
+  ordersVsClicks: "Sipariş vs Tıklama",
+  newVsActive: "Yeni vs Aktif",
+  sessionsVsEvents: "Oturum vs Olay",
+  chartData: "Grafik Verisi",
     
     // Action Center
     todaysInsight: "Bugünün İçgörüsü",
@@ -251,6 +271,12 @@ export const translations = {
     reports: "Reports",
     opportunitiesActions: "Opportunities & Actions",
     autopilot: "Autopilot",
+  // Pie selectors
+  revenueVsAdSpend: "Revenue vs Ad Spend",
+  ordersVsClicks: "Orders vs Clicks",
+  newVsActive: "New vs Active",
+  sessionsVsEvents: "Sessions vs Events",
+  chartData: "Chart Data",
     
     // Dashboard page specific content
     overview: "Overview",
@@ -315,6 +341,9 @@ export const translations = {
     // Marketing channels
     googleAds: "Google Ads",
     metaAds: "Meta Ads",
+  // GA users split
+  newUsers: "New Users",
+  activeUsers: "Active Users",
     tiktokAds: "TikTok Ads",
     emailMarketing: "Email Marketing",
     organicTraffic: "Organic Traffic",
