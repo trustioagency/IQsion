@@ -1,97 +1,79 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
-import { ScrollArea } from '../components/ui/scroll-area';
+ 
 
 import { 
-  BarChart3, PieChart, TrendingUp, TrendingDown, Target, Users, 
-  ShoppingCart, DollarSign, Calendar, Filter, ArrowUpDown,
-  Eye, Share2, MousePointer, Smartphone, Monitor, Tablet,
-  Facebook, Instagram, Search, Mail, MessageCircle, Brain,
-  Sparkles, Lightbulb, AlertTriangle, Zap, Send, ChevronDown,
+  TrendingUp, Users,
+  ShoppingCart, DollarSign,
+  Eye, 
+  MousePointer,
+  Search,
   ArrowRight
 } from "lucide-react";
-import AIChatPanel from "../components/ai-chat-panel";
-import { useQuery } from '@tanstack/react-query';
+// import AIChatPanel from "../components/ai-chat-panel";
 
 export default function Attribution() {
-  const [timeRange, setTimeRange] = useState('30d');
-  const [selectedModel, setSelectedModel] = useState('lastClick');
-  const [results, setResults] = useState<any>(null);
+  const [timeRange, setTimeRange] = useState<'7d'|'30d'|'90d'>('30d');
+  const [selectedKpi, setSelectedKpi] = useState<'revenue'|'traffic'|'profit'>('revenue');
+  const [sources, setSources] = useState<Array<{channel:string; value:number; share:number; revenue?:number; orders?:number; spend?:number}>>([]);
+  const [totals, setTotals] = useState<{ total:number; startDate:string; endDate:string; note?:string } | null>(null);
+  const [dynJourneys, setDynJourneys] = useState<Array<{ percentage:number; path: Array<{ channel:string; icon:any; action:string; color:string }> }>>([]);
 
-  // API call to get attribution models
-  const { data: models } = useQuery({
-    queryKey: ['attribution-models'],
-    queryFn: async () => {
-      const response = await fetch('/api/attribution/models');
-      return response.json();
-    }
-  });
-
-  // API call to calculate attribution
-  const calculateAttribution = async () => {
-    try {
-      const response = await fetch('/api/attribution/calculate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          dateRange: '30d'
-        })
-      });
-      const data = await response.json();
-      setResults(data);
-    } catch (error) {
-      console.error('Attribution calculation failed:', error);
-    }
-  };
-
+  // Fetch KPI-based sources from backend
   useEffect(() => {
-    if (selectedModel) {
-      calculateAttribution();
-    }
-  }, [selectedModel]);
+    const toRange = (tr: '7d'|'30d'|'90d') => {
+      const today = new Date();
+      const endD = new Date(today); endD.setDate(today.getDate() - 1);
+      const startD = new Date(endD);
+      startD.setDate(endD.getDate() - (tr === '7d' ? 6 : tr === '30d' ? 29 : 89));
+      const fmt = (d: Date) => d.toISOString().slice(0,10);
+      return { start: fmt(startD), end: fmt(endD) };
+    };
+    const { start, end } = toRange(timeRange);
+    const run = async () => {
+      try {
+        const r = await fetch(`/api/attribution/sources?kpi=${selectedKpi}&startDate=${start}&endDate=${end}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        setSources(j?.sources || []);
+        setTotals({ total: j?.total || 0, startDate: j?.startDate, endDate: j?.endDate, note: j?.note });
+        // Map backend journeys to UI structure if present
+        const journeys = Array.isArray(j?.journeys) ? j.journeys as Array<{ percentage:number; steps: Array<{ key:string }> }> : [];
+        const mapStep = (key: string) => {
+          switch (key) {
+            case 'google':
+              return { channel: 'Google', icon: <Search className="w-5 h-5" />, action: 'Arama', color: 'from-blue-600 to-blue-700' };
+            case 'instagram':
+            case 'meta':
+              return { channel: 'Instagram', icon: <Eye className="w-5 h-5" />, action: 'Reklam Gösterimi', color: 'from-pink-500 to-rose-500' };
+            case 'tiktok':
+              return { channel: 'TikTok', icon: <Eye className="w-5 h-5" />, action: 'Video İzleme', color: 'from-gray-800 to-gray-900' };
+            case 'email':
+              return { channel: 'Email', icon: <Users className="w-5 h-5" />, action: 'Kampanya', color: 'from-orange-500 to-red-500' };
+            case 'organic':
+              return { channel: 'Organik', icon: <Search className="w-5 h-5" />, action: 'Doğal Arama', color: 'from-teal-500 to-emerald-500' };
+            case 'website':
+              return { channel: 'Website', icon: <MousePointer className="w-5 h-5" />, action: 'Site Ziyareti', color: 'from-blue-500 to-cyan-500' };
+            case 'purchase':
+              return { channel: 'Satın Alma', icon: <ShoppingCart className="w-5 h-5" />, action: 'Dönüşüm', color: 'from-purple-500 to-violet-500' };
+            default:
+              return { channel: key, icon: <MousePointer className="w-5 h-5" />, action: 'Adım', color: 'from-slate-500 to-slate-600' };
+          }
+        };
+  const uiJourneys = journeys.map(jn => ({ percentage: Number(jn.percentage || 0), path: (jn.steps || []).map(s => mapStep(s.key)) }));
+        setDynJourneys(uiJourneys);
+      } catch (e) {
+        setSources([]);
+        setTotals({ total: 0, startDate: start, endDate: end, note: 'Veri alınamadı' });
+        setDynJourneys([]);
+      }
+    };
+    run();
+  }, [selectedKpi, timeRange]);
 
-  // Revenue distribution data for different models
-  const revenueDistribution = {
-    lastClick: {
-      'Google Ads': 60,
-      'Meta Ads': 15,
-      'Instagram': 10,
-      'TikTok Ads': 8,
-      'Email': 4,
-      'Direkt': 3
-    },
-    firstClick: {
-      'Google Ads': 25,
-      'Meta Ads': 20,
-      'Instagram': 30,
-      'TikTok Ads': 15,
-      'Email': 5,
-      'Direkt': 5
-    },
-    linear: {
-      'Google Ads': 40,
-      'Meta Ads': 22,
-      'Instagram': 18,
-      'TikTok Ads': 12,
-      'Email': 5,
-      'Direkt': 3
-    },
-    smart: {
-      'Google Ads': 40,
-      'Meta Ads': 20,
-      'Instagram': 35,
-      'TikTok Ads': 3,
-      'Email': 1,
-      'Direkt': 1
-    }
-  };
+  // --
 
   const customerJourneys = [
     {
@@ -122,64 +104,31 @@ export default function Attribution() {
     }
   ];
 
-  const insights = [
-    {
-      id: 1,
-      icon: <Target className="w-5 h-5 text-blue-400" />,
-      title: "Hedef Kitle Analizi",
-      content: "Instagram'dan gelen müşterilerinizin %68'i 25-34 yaş aralığında. Bu segment için özel kampanyalar oluşturabilirsiniz.",
-      type: "info"
-    },
-    {
-      id: 2,
-      icon: <TrendingUp className="w-5 h-5 text-green-400" />,
-      title: "Büyüme Fırsatı",
-      content: "Email Marketing kanalınızın dönüşüm oranı %12 ile sektör ortalamasının 3 katı. Bu başarıyı diğer kanallarda da uygulayabilirsiniz.",
-      type: "success"
-    },
-    {
-      id: 3,
-      icon: <AlertTriangle className="w-5 h-5 text-yellow-400" />,
-      title: "Dikkat Edilmesi Gereken",
-      content: "Google Ads'teki tıklama maliyetleriniz son 2 haftada %15 arttı. Anahtar kelime stratejinizi gözden geçirmenizi öneriyorum.",
-      type: "warning"
-    },
-    {
-      id: 4,
-      icon: <Lightbulb className="w-5 h-5 text-purple-400" />,
-      title: "Strateji Önerisi",
-      content: "TikTok'tan gelen genç kullanıcıları Instagram'da retargeting ile yakalayarak dönüşüm oranınızı %25 artırabilirsiniz.",
-      type: "tip"
-    },
-    {
-      id: 5,
-      icon: <TrendingDown className="w-5 h-5 text-red-400" />,
-      title: "Performans Uyarısı",
-      content: "Meta Ads kampanyalarınızın CTR'ı düşüş eğiliminde. Kreatif materyallerinizi yenilemenin zamanı gelmiş olabilir.",
-      type: "alert"
-    }
-  ];
+  // --
 
-  const currentData = revenueDistribution[selectedModel as keyof typeof revenueDistribution];
-
-  const getChannelColor = (channel: string) => {
-    const colors: { [key: string]: string } = {
-      'Google Ads': 'bg-gradient-to-r from-blue-500 to-blue-600',
-      'Meta Ads': 'bg-gradient-to-r from-blue-600 to-blue-700',
-      'Instagram': 'bg-gradient-to-r from-pink-500 to-rose-500',
-      'TikTok Ads': 'bg-gradient-to-r from-gray-800 to-black',
-      'Email': 'bg-gradient-to-r from-green-500 to-emerald-500',
-      'Direkt': 'bg-gradient-to-r from-gray-500 to-gray-600'
+  // Color mapping for normalized channels
+  const getNormColor = (channel: string) => {
+    const map: Record<string,string> = {
+      google: 'bg-gradient-to-r from-blue-500 to-blue-600',
+      meta: 'bg-gradient-to-r from-indigo-500 to-indigo-700',
+      instagram: 'bg-gradient-to-r from-pink-500 to-rose-500',
+      tiktok: 'bg-gradient-to-r from-gray-800 to-black',
+      email: 'bg-gradient-to-r from-green-500 to-emerald-600',
+      organic: 'bg-gradient-to-r from-teal-500 to-teal-700',
+      direct: 'bg-gradient-to-r from-slate-500 to-slate-600',
+      referral: 'bg-gradient-to-r from-amber-500 to-amber-600',
+      other: 'bg-gradient-to-r from-zinc-500 to-zinc-700',
     };
-    return colors[channel] || 'bg-gradient-to-r from-gray-400 to-gray-500';
+    return map[channel] || map.other;
   };
 
-  const modelOptions = [
-    { value: 'lastClick', label: 'Son Tıklama', desc: 'Satışı tamamlayan son adım' },
-    { value: 'firstClick', label: 'İlk Tıklama', desc: 'İlk tanışma adımı' },
-    { value: 'linear', label: 'Lineer Model', desc: 'Eşit dağılım' },
-    { value: 'smart', label: 'Akıllı Model', desc: 'AI tabanlı analiz', premium: true }
-  ];
+  // --
+
+  const kpiOptions = [
+    { value: 'revenue', label: 'Gelir' },
+    { value: 'traffic', label: 'Trafik' },
+    { value: 'profit', label: 'Kar (yaklaşık)' },
+  ] as const;
 
   return (
         <main className="h-full overflow-y-auto bg-slate-800/50 p-4 sm:p-6 lg:p-8">
@@ -201,37 +150,21 @@ export default function Attribution() {
                       <span className="text-sm font-medium text-slate-300">Bakış Açısı:</span>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      {modelOptions.map((option) => (
-                        <Button
-                          key={option.value}
-                          variant={selectedModel === option.value ? 'default' : 'outline'}
-                          size="sm"
-                          className={`h-auto px-4 py-2 flex flex-col gap-1 min-w-[120px] relative transition-all duration-200 ${
-                            selectedModel === option.value 
-                              ? option.premium 
-                                ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 border-0' 
-                                : 'bg-blue-600 hover:bg-blue-700 border-0'
-                              : 'bg-slate-700/50 hover:bg-slate-600/50 border-slate-600 text-slate-300'
-                          }`}
-                          onClick={() => setSelectedModel(option.value)}
-                        >
-                          <div className="flex items-center gap-1">
-                            {option.premium && <Sparkles className="w-3 h-3" />}
-                            <span className="font-medium text-xs">{option.label}</span>
-                          </div>
-                          <span className="text-xs opacity-80 text-center">{option.desc}</span>
-                          {option.premium && (
-                            <Badge className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs px-1 py-0">
-                              AI
-                            </Badge>
-                          )}
-                        </Button>
-                      ))}
+                    <div className="flex items-center gap-3">
+                      <Select value={selectedKpi} onValueChange={(v)=>setSelectedKpi(v as 'revenue'|'traffic'|'profit')}>
+                        <SelectTrigger className="bg-slate-700/50 border-slate-600 text-slate-300 w-48">
+                          <SelectValue placeholder="KPI seç" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-800 border-slate-600">
+                          {kpiOptions.map((k)=> (
+                            <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="ml-auto flex items-center gap-4">
-                      <Select value={timeRange} onValueChange={setTimeRange}>
+                      <Select value={timeRange} onValueChange={(v)=>setTimeRange(v as '7d'|'30d'|'90d')}>
                         <SelectTrigger className="bg-slate-700/50 border-slate-600 text-slate-300 w-32">
                           <SelectValue />
                         </SelectTrigger>
@@ -247,28 +180,33 @@ export default function Attribution() {
               </Card>
             </div>
 
-            {/* Revenue Distribution */}
+            {/* Sources ranking by selected KPI */}
             <Card className="bg-slate-800/60 border-slate-700/50 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="text-white flex items-center gap-2">
                   <DollarSign className="w-5 h-5" />
-                  Hazine Dağılımı
+                  Kaynak Sıralaması
                 </CardTitle>
-                <p className="text-slate-400 text-sm">Toplam cironun kanallar arasındaki dağılımı</p>
+                <p className="text-slate-400 text-sm">
+                  Seçilen KPI'ya göre kanalların katkısı
+                  {totals?.note ? ` — ${totals.note}` : ''}
+                </p>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {Object.entries(currentData).map(([channel, percentage]) => (
-                    <div key={channel} className="bg-slate-700/30 rounded-xl p-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {sources.map((s) => (
+                    <div key={s.channel} className="bg-slate-700/30 rounded-xl p-4 space-y-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-white font-medium">{channel}</span>
-                        <span className="text-white font-bold text-lg">%{percentage}</span>
+                        <span className="text-white font-medium capitalize">{s.channel}</span>
+                        <span className="text-white font-bold text-lg">%{s.share}</span>
                       </div>
                       <div className="w-full bg-slate-600/50 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full transition-all duration-1000 ease-out ${getChannelColor(channel)}`}
-                          style={{ width: `${percentage}%` }}
-                        />
+                        <div className={`h-2 rounded-full ${getNormColor(s.channel)}`} style={{ width: `${s.share}%` }} />
+                      </div>
+                      <div className="text-xs text-slate-400 flex gap-4">
+                        {selectedKpi === 'traffic' && <span>Oturum: {s.value.toLocaleString('tr-TR')}</span>}
+                        {selectedKpi !== 'traffic' && <span>Değer: {s.value.toLocaleString('tr-TR', { style:'currency', currency:'TRY' })}</span>}
+                        {typeof s.orders === 'number' && s.orders > 0 && <span>Sipariş: {s.orders}</span>}
                       </div>
                     </div>
                   ))}
@@ -287,7 +225,7 @@ export default function Attribution() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-8">
-                  {customerJourneys.map((journey, index) => (
+                  {(dynJourneys.length ? dynJourneys : customerJourneys).map((journey, index) => (
                     <div key={index} className="relative">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3">
@@ -331,17 +269,7 @@ export default function Attribution() {
               </CardContent>
             </Card>
 
-            {/* AI Insights with Chat */}
-            <AIChatPanel 
-              pageContext="Atıflandırma Analizi"
-              insights={insights}
-              suggestions={[
-                'En etkili kanal hangisi?',
-                'Instagram vs Google performans karşılaştırması',
-                'Müşteri yolculuğunu analiz et',
-                'Bütçe dağılımı öner'
-              ]}
-            />
+            {/* AI panel kaldırıldı */}
 
           </div>
         </main>

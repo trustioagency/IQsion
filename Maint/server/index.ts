@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+// reload hint: touching this file triggers tsx watch to reload env
 import dotenv from "dotenv";
 import path from "path";
 import cors from "cors";

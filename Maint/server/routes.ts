@@ -1,5 +1,8 @@
 
 import express from "express";
+import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
 import admin from "./firebase";
 import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
@@ -15,6 +18,393 @@ async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 1000
   }
 }
 const router = express.Router();
+
+// --- AI: Chat endpoint (Gemini via REST) ---
+
+router.post('/api/ai/chat', async (req, res) => {
+  try {
+    // Ensure GEMINI_API_KEY is loaded even if server wasn't restarted after env edit
+    let apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      try {
+        const here = path.dirname(new URL(import.meta.url).pathname);
+        const candidates = [
+          // when running via `npm --prefix Maint run dev`
+          path.resolve(process.cwd(), 'server', 'env'),
+          path.resolve(process.cwd(), 'Maint', 'server', 'env'),
+          path.resolve(here, 'env'),
+        ];
+        for (const p of candidates) {
+          const r = dotenv.config({ path: p });
+          if (!r.error) break;
+        }
+        apiKey = process.env.GEMINI_API_KEY || '';
+        if (!apiKey) {
+          for (const p of candidates) {
+            try {
+              const txt = fs.readFileSync(p, 'utf-8');
+              const line = txt.split(/\r?\n/).find(l => /^\s*GEMINI_API_KEY\s*=/.test(l) && !/^\s*#/.test(l));
+              if (line) {
+                const val = line.split('=')[1]?.trim()?.replace(/^"|"$/g, '');
+                if (val) { apiKey = val; break; }
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+  const { message, context, debug: bodyDebug } = (req.body || {}) as { message?: string; context?: string; debug?: any };
+  const isDebug = String((req.query as any)?.debug || bodyDebug || '') === '1' && process.env.NODE_ENV !== 'production';
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ message: 'message is required' });
+    }
+
+    // Fallback when API key is missing: return a helpful dev-mode reply
+    if (!apiKey) {
+      const fallback = `Dev mode yanıtı: Henüz gerçek bir AI anahtarı yapılandırılmadı. (GEMINI_API_KEY)` +
+        `\n\nSorduğunuz: "${message}"` +
+        (context ? `\nBağlam: ${context}` : '') +
+        `\n\nKurulum: Maint/server/env dosyasına GEMINI_API_KEY ekleyin ve sunucuyu yeniden başlatın.`;
+      return res.json({ response: fallback });
+    }
+
+    const systemPrompt = [
+      'You are IQsion AI, a marketing analytics copilot for SMEs.',
+      'Answer briefly, in clear Turkish when the user is Turkish, otherwise English.',
+      'Use practical marketing language, give concrete next actions when helpful.',
+      'If metrics are needed, remind the user you can analyze the dashboard data on request.',
+    ].join(' ');
+
+    const userPrompt = [
+      context ? `Bağlam: ${context}` : '',
+      `Kullanıcı mesajı: ${message}`,
+    ].filter(Boolean).join('\n');
+
+    // Helper to call a given model and parse text
+    const callModel = async (model: string) => {
+      const body = {
+        contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+        generationConfig: {
+          temperature: 0.6,
+          topP: 0.9,
+          maxOutputTokens: 512,
+        },
+      } as any;
+      // Try v1, then v1beta for compatibility
+      const tryOnce = async (version: 'v1' | 'v1beta') => {
+        const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const r = await fetchWithTimeout(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 15000);
+        const j = await (r.json() as Promise<any>);
+        return { r, j };
+      };
+      let { r, j } = await tryOnce('v1');
+      if (!r.ok && r.status === 404) {
+        ({ r, j } = await tryOnce('v1beta'));
+      }
+      if (!r.ok) {
+        const msg = j?.error?.message || 'Gemini API error';
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('[AI CHAT GEMINI ERROR]', model, r.status, msg);
+        }
+        return { ok: false as const, status: r.status, error: msg, raw: j };
+      }
+      // Collect text parts, guard different shapes
+      const candidate = (j?.candidates && j.candidates[0]) || null;
+      const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+      const texts = parts.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).filter(Boolean);
+      const text = texts.join('\n').trim();
+      const blocked = j?.promptFeedback?.blockReason || candidate?.safetyRatings?.[0]?.blockedReason || candidate?.finishReason;
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[AI CHAT DEBUG]', model, {
+          hasText: Boolean(text),
+          finishReason: candidate?.finishReason || null,
+          blockReason: j?.promptFeedback?.blockReason || null,
+        });
+      }
+      return { ok: true as const, text, blocked, raw: j };
+    };
+
+    // Try flash first, then pro as a fallback if empty/blocked
+    const primary = await callModel('gemini-1.5-flash-001');
+    if (primary.ok && primary.text) {
+      if (isDebug) {
+        const dbg = { model: 'gemini-1.5-flash', finishReason: (primary as any)?.raw?.candidates?.[0]?.finishReason || null };
+        return res.json({ response: primary.text, _debug: dbg });
+      }
+      return res.json({ response: primary.text });
+    }
+    // If blocked or empty, try a more capable model
+  const secondary = await callModel('gemini-1.5-pro-001');
+    if (secondary.ok && secondary.text) {
+      if (isDebug) {
+        const dbg = { model: 'gemini-1.5-pro', finishReason: (secondary as any)?.raw?.candidates?.[0]?.finishReason || null };
+        return res.json({ response: secondary.text, _debug: dbg });
+      }
+      return res.json({ response: secondary.text });
+    }
+
+    // If Gemini is unavailable or not enabled, optionally fallback to OpenAI if key exists
+    const openaiKey = process.env.OPENAI_API_KEY || '';
+    if (openaiKey) {
+      try {
+        const oaBody = {
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.6,
+          max_tokens: 512,
+        } as any;
+        const oaRes = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKey}`,
+          },
+          body: JSON.stringify(oaBody),
+        }, 15000);
+        const oaJson: any = await oaRes.json();
+        if (oaRes.ok) {
+          const txt = String(oaJson?.choices?.[0]?.message?.content || '').trim();
+          if (txt) {
+            if (isDebug) return res.json({ response: txt, _debug: { model: oaBody.model, provider: 'openai' } });
+            return res.json({ response: txt });
+          }
+        } else {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('[AI CHAT OPENAI ERROR]', oaRes.status, oaJson);
+          }
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('[AI CHAT OPENAI EXCEPTION]', (e as any)?.message || String(e));
+        }
+      }
+    }
+    // If the API returns NOT_FOUND for models, the Generative Language API is likely not enabled for this key/project
+    const notFound = (err: any) => typeof err?.status === 'number' && err.status === 404;
+    if (!primary.ok && notFound(primary) || !secondary.ok && notFound(secondary)) {
+      const hint = 'AI modeli bu proje için etkin değil. Lütfen Google Cloud Console > APIs & Services bölümünden "Generative Language API"yi etkinleştirin ve bu API için bir API anahtarı oluşturun.';
+      const payload: any = { response: hint };
+      if (isDebug) payload._debug = { primary: (primary as any)?.raw || null, secondary: (secondary as any)?.raw || null };
+      return res.json(payload);
+    }
+    const blocked = (primary as any)?.blocked || (secondary as any)?.blocked;
+    if (blocked) {
+      const payload: any = { response: `İçerik üretimi tamamlanamadı (${blocked}). Lütfen isteği daha nötr/iş odaklı ve kısa şekilde yeniden ifade edin.` };
+      if (isDebug) payload._debug = { blocked };
+      return res.json(payload);
+    }
+    if (process.env.NODE_ENV !== 'production') {
+      const sniff = (obj: any) => {
+        try { return JSON.stringify(obj).slice(0, 600); } catch { return String(obj); }
+      };
+      console.warn('[AI CHAT] Empty response from Gemini (both models). flash=', sniff((primary as any)?.raw), ' pro=', sniff((secondary as any)?.raw));
+    }
+    // If 404 model not found, surface a clear enablement hint for the user
+    const pErr = (primary as any)?.raw?.error?.status || (secondary as any)?.raw?.error?.status;
+    const pCode = (primary as any)?.raw?.error?.code || (secondary as any)?.raw?.error?.code;
+    if (pCode === 404 || pErr === 'NOT_FOUND') {
+      return res.json({ response: 'AI modeli bu proje için etkin değil. Lütfen Google Cloud Console > APIs & Services bölümünden "Generative Language API"yi etkinleştirin ve bu API için bir API anahtarı oluşturun.' });
+    }
+    const payload: any = { response: 'Üzgünüm, şu an yanıt üretemedim. Lütfen mesajınızı biraz daha net ve kısa yazın (örn: “ROAS nedir, 1 cümle?”).' };
+    if (isDebug) payload._debug = { flash: (primary as any)?.raw || null, pro: (secondary as any)?.raw || null };
+    return res.json(payload);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error('[AI CHAT ERROR]', msg);
+    return res.status(500).json({ message: 'AI chat failed', error: msg });
+  }
+});
+
+// --- Attribution: KPI-based sources ranking ---
+// GET /api/attribution/sources?kpi=traffic|revenue|profit&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&userId=...
+router.get('/api/attribution/sources', async (req, res) => {
+  try {
+    const kpi = typeof req.query.kpi === 'string' ? req.query.kpi : 'traffic';
+    const userId = (typeof req.query.userId === 'string' && req.query.userId) ? req.query.userId : 'test-user';
+    // Default: last 30 days ending yesterday
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const startDate = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+    const baseProto = req.protocol || 'http';
+    const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1', 'localhost');
+    const baseUrl = `${baseProto}://${host}`;
+
+    // Helper to normalize referrers to channels
+    const normalizeChannel = (ref: string | null | undefined, sourceName?: string | null): string => {
+      const s = (String(ref || '').toLowerCase());
+      const src = String(sourceName || '').toLowerCase();
+      if (/google|gclid|utm_source=google/.test(s) || src.includes('google')) return 'google';
+      if (/facebook|instagram|fb|meta|utm_source=facebook|utm_source=instagram/.test(s) || src.includes('facebook') || src.includes('instagram') || src.includes('meta')) return 'meta';
+      if (/tiktok|utm_source=tiktok/.test(s) || src.includes('tiktok')) return 'tiktok';
+      if (/mail|email|utm_source=email|utm_medium=email/.test(s) || src.includes('email')) return 'email';
+      if (!s || s === 'null') return 'direct';
+      if (/organic|utm_medium=organic|utm_source=organic/.test(s)) return 'organic';
+      // Fallbacks
+      if (/ref|utm_source=referral/.test(s)) return 'referral';
+      return 'other';
+    };
+
+    if (kpi === 'traffic') {
+      // Ensure GA connection exists
+      const gaSnap = await admin.database().ref(`platformConnections/${userId}/google_analytics`).once('value');
+      const gaConn = gaSnap.val();
+      if (!gaConn || !gaConn.accessToken) {
+        return res.json({ kpi: 'traffic', startDate, endDate, total: 0, sources: [], note: 'Google Analytics bağlantısı bulunamadı.' });
+      }
+      // Query GA summary per channel and rank by sessions
+      const channels = ['google', 'meta', 'tiktok', 'email', 'organic'];
+      const results: Array<{ channel: string; value: number }> = [];
+      for (const ch of channels) {
+        try {
+          const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&channel=${encodeURIComponent(ch)}`;
+          const r = await fetchWithTimeout(`${baseUrl}/api/analytics/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000);
+          if (r.ok) {
+            const j: any = await r.json();
+            const sessions = Number(j?.totals?.sessions || 0);
+            results.push({ channel: ch, value: sessions });
+          } else {
+            results.push({ channel: ch, value: 0 });
+          }
+        } catch (_) {
+          results.push({ channel: ch, value: 0 });
+        }
+      }
+      const total = results.reduce((a, b) => a + b.value, 0);
+      if (total === 0) {
+        return res.json({ kpi: 'traffic', startDate, endDate, total: 0, sources: [], note: 'Seçilen aralıkta trafik verisi bulunamadı veya yetki yok.' });
+      }
+      const ranked = results
+        .map(r => ({ ...r, share: Number(((r.value / total) * 100).toFixed(2)) }))
+        .sort((a, b) => b.value - a.value);
+
+      // Derive simple journeys from top channels
+      const top = ranked.slice(0, 3);
+      const toJourney = (ch: string) => {
+        const base = [{ key: 'website' }];
+        if (ch === 'google') return [{ key: 'google' }, ...base, { key: 'purchase' }];
+        if (ch === 'meta') return [{ key: 'instagram' }, ...base, { key: 'purchase' }];
+        if (ch === 'tiktok') return [{ key: 'tiktok' }, ...base, { key: 'purchase' }];
+        if (ch === 'email') return [{ key: 'email' }, ...base, { key: 'purchase' }];
+        if (ch === 'organic') return [{ key: 'organic' }, ...base, { key: 'purchase' }];
+        return [{ key: ch }, ...base, { key: 'purchase' }];
+      };
+      const journeys = top.map(t => ({ percentage: t.share, steps: toJourney(t.channel) }));
+
+      return res.json({ kpi: 'traffic', startDate, endDate, total, sources: ranked, journeys });
+    }
+
+    // revenue and profit need Shopify orders by referrer/source
+    // Load Shopify connection
+    const shopSnap = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+    const shopConn = shopSnap.val();
+    if (!shopConn?.storeUrl || !shopConn?.accessToken) {
+      return res.json({ kpi, startDate, endDate, sources: [], total: 0, note: 'Shopify bağlantısı bulunamadı.' });
+    }
+
+    // Fetch orders in range with necessary fields
+    const base = `https://${shopConn.storeUrl}/admin/api/2025-01/orders.json`;
+    const params = new URLSearchParams();
+    params.set('status', 'any');
+    params.set('limit', '250');
+    params.set('created_at_min', `${startDate}T00:00:00Z`);
+    params.set('created_at_max', `${endDate}T23:59:59Z`);
+    // include fields with referrer info
+    // Note: not all fields are filterable; we fetch full objects in chunks via pagination
+    let nextUrl: string | null = `${base}?${params.toString()}`;
+    const orders: any[] = [];
+    let safety = 0;
+    while (nextUrl && safety < 50) {
+      safety++;
+      const r = await fetchWithTimeout(nextUrl, { method: 'GET', headers: { 'X-Shopify-Access-Token': shopConn.accessToken, 'Content-Type': 'application/json' } }, 20000);
+      const j: any = await r.json();
+      if (!r.ok) break;
+      const chunk: any[] = j?.orders || [];
+      orders.push(...chunk);
+      const link = (r as any).headers?.get ? (r as any).headers.get('link') : undefined;
+      if (link && /<([^>]+)>; rel="next"/i.test(link)) {
+        const m = link.match(/<([^>]+)>; rel="next"/i);
+        nextUrl = m ? m[1] : null;
+      } else {
+        nextUrl = null;
+      }
+    }
+
+    // Aggregate revenue and counts by channel from referring_site/source_name
+    const byChannel: Record<string, { revenue: number; orders: number } > = {};
+    let totalRevenue = 0;
+    for (const o of orders) {
+      if (o?.cancelled_at) continue;
+      const fs = String(o?.financial_status || '').toLowerCase();
+      const isPaid = ['paid','partially_paid','partially_refunded'].includes(fs);
+      // For revenue: include non-cancelled orders; if you prefer only paid, set isPaid
+      const price = Number.parseFloat(String(o?.total_price || o?.subtotal_price || '0')) || 0;
+      const ref = o?.referring_site || o?.landing_site || '';
+      const ch = normalizeChannel(ref, o?.source_name);
+      if (!byChannel[ch]) byChannel[ch] = { revenue: 0, orders: 0 };
+      byChannel[ch].revenue += price;
+      byChannel[ch].orders += 1;
+      totalRevenue += price;
+    }
+
+    // If profit requested, fetch ad spend per major channel
+    let spendBy: Record<string, number> = { google: 0, meta: 0, tiktok: 0 };
+    if (kpi === 'profit') {
+      try {
+        const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+        const [metaRes, gadsRes] = await Promise.allSettled([
+          fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+          fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        ]);
+        const extractSpend = async (r: any) => {
+          if (r.status !== 'fulfilled') return 0;
+          const res = r.value as Response;
+          if (!res.ok) return 0;
+          const j: any = await res.json();
+          return Number(j?.totals?.spend || 0);
+        };
+        spendBy.meta = await extractSpend(metaRes);
+        spendBy.google = await extractSpend(gadsRes);
+      } catch (_) {}
+    }
+
+    const sources = Object.entries(byChannel).map(([channel, val]) => {
+      const revenue = Number(val.revenue.toFixed(2));
+      const spend = kpi === 'profit' ? (spendBy[channel as keyof typeof spendBy] || 0) : 0;
+      const profitApprox = revenue - spend;
+      const value = kpi === 'revenue' ? revenue : profitApprox;
+      return { channel, revenue, orders: val.orders, spend, value };
+    }).sort((a, b) => b.value - a.value);
+
+    const total = kpi === 'revenue' ? totalRevenue : sources.reduce((a, s) => a + s.value, 0);
+    const ranked = sources.map(s => ({ ...s, share: total > 0 ? Number(((s.value / total) * 100).toFixed(2)) : 0 }));
+
+    // Derive simple journeys from top contributors
+    const top = ranked.slice(0, 3);
+    const toJourney = (ch: string) => {
+      const base = [{ key: 'website' }];
+      if (ch === 'google') return [{ key: 'google' }, ...base, { key: 'purchase' }];
+      if (ch === 'meta') return [{ key: 'instagram' }, ...base, { key: 'purchase' }];
+      if (ch === 'tiktok') return [{ key: 'tiktok' }, ...base, { key: 'purchase' }];
+      if (ch === 'email') return [{ key: 'email' }, ...base, { key: 'purchase' }];
+      if (ch === 'organic') return [{ key: 'organic' }, ...base, { key: 'purchase' }];
+      return [{ key: ch }, ...base, { key: 'purchase' }];
+    };
+    const journeys = top.map(t => ({ percentage: t.share, steps: toJourney(t.channel) }));
+
+    const note = kpi === 'profit' ? 'Kar yaklaşık hesaplandı (COGS dahil değildir). Dilerseniz COGS ile detaylandırılabilir.' : undefined;
+    return res.json({ kpi, startDate, endDate, total, sources: ranked, journeys, note });
+  } catch (error) {
+    console.error('[ATTRIBUTION SOURCES ERROR]', error);
+    return res.status(500).json({ message: 'Atıflandırma kaynakları hesaplanamadı', error: String(error) });
+  }
+});
 
 // Kullanıcı bilgisi döndüren endpoint
 router.get('/api/auth/user', async (req, res) => {
@@ -1586,7 +1976,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           return res.status(500).json({ message: 'Google Analytics accessToken yenileme hatası.', error: err });
         }
       }
-  const propertyId = req.query.propertyId || 'YOUR_GA4_PROPERTY_ID';
+  const propertyId = (req.query.propertyId as string) || connection.propertyId || 'YOUR_GA4_PROPERTY_ID';
   let startDate = req.query.startDate;
   let endDate = req.query.endDate;
   const channel = typeof req.query.channel === 'string' ? req.query.channel : undefined;

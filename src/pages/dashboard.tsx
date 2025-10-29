@@ -1023,9 +1023,11 @@ export default function Dashboard() {
                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${kpi.bgColor} shadow-lg`}>
                       <Icon className={`w-6 h-6 ${kpi.color}`} />
                     </div>
-                    <Badge variant="secondary" className={`${kpi.changeType === 'positive' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
-                      {kpi.change}
-                    </Badge>
+                    {compareEnabled && kpi.change ? (
+                      <Badge variant="secondary" className={`${kpi.changeType === 'positive' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>
+                        {kpi.change}
+                      </Badge>
+                    ) : null}
                   </div>
                   <h4 className="text-slate-400 text-sm mb-2">{kpi.title}</h4>
                   <p className="text-xl font-bold text-white mb-1">{kpi.value}</p>
