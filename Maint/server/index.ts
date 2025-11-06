@@ -72,6 +72,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Basit sağlık kontrolü
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
 
 
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -82,6 +82,28 @@ export const translations = {
     // Additional terms
     performance: "performans",
     systemActive: "Sistem Aktif",
+
+  // Onboarding / Start Guide
+  onboardingStart: "Başlangıç Kılavuzu",
+  onboardingIntro: "Bağlantılarınızı yapın, pikseli kurun ve şirket bilgilerinizi paylaşın.",
+  stepConnectionsTitle: "Bağlantılar",
+  stepConnectionsDesc: "Shopify ve pazarlama hesaplarınızı bağlayın.",
+  stepPixelTitle: "Takip Pikseli",
+  stepPixelDesc: "Aşağıdaki snippet'i sitenize ekleyin ve doğrulayın.",
+  generatePixel: "Piksel Oluştur",
+  copySnippet: "Kodunu Kopyala",
+  verifyPixel: "Pikseli Doğrula",
+  pixelInstalled: "Piksel çalışıyor",
+  pixelNotSeen: "Henüz veri alınmadı — snippet'i ekledikten sonra doğrulayın.",
+  stepProfileTitle: "Şirket Profili",
+  stepProfileDesc: "Sektör, büyüklük ve temeller — içgörüleri kişiselleştirelim.",
+  companySector: "Şirket Sektörü",
+  companySize: "Şirket Büyüklüğü",
+  avgOrderValue: "Ortalama Sipariş Tutarı",
+  grossMargin: "Brüt Kar Marjı (%)",
+  targetCountry: "Hedef Ülke",
+  next: "İleri",
+  finish: "Bitir",
     
     // Dashboard specific translations
     genelBakış: "Genel Bakış",
@@ -230,6 +252,28 @@ export const translations = {
     // Additional terms
     performance: "performance",
     systemActive: "System Active",
+
+  // Onboarding / Start Guide
+  onboardingStart: "Start Guide",
+  onboardingIntro: "Connect accounts, install the pixel, and share company basics.",
+  stepConnectionsTitle: "Connections",
+  stepConnectionsDesc: "Connect your Shopify and marketing accounts.",
+  stepPixelTitle: "Tracking Pixel",
+  stepPixelDesc: "Add the snippet below to your site and verify.",
+  generatePixel: "Generate Pixel",
+  copySnippet: "Copy Snippet",
+  verifyPixel: "Verify Pixel",
+  pixelInstalled: "Pixel verified",
+  pixelNotSeen: "No hits yet — verify after adding the snippet.",
+  stepProfileTitle: "Company Profile",
+  stepProfileDesc: "Industry, size and basics — let's personalize insights.",
+  companySector: "Company Sector",
+  companySize: "Company Size",
+  avgOrderValue: "Average Order Value",
+  grossMargin: "Gross Margin (%)",
+  targetCountry: "Target Country",
+  next: "Next",
+  finish: "Finish",
     
     // Dashboard specific translations
     genelBakış: "Overview",

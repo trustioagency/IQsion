@@ -142,6 +142,18 @@ export default function Settings() {
     }
   });
 
+  // TikTok ad accounts list (for selection UI)
+  const { data: tiktokAdAccounts } = useQuery({
+    queryKey: ['tiktok-adaccounts', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user && !!(connections as any)?.tiktok?.isConnected,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/tiktok/adaccounts?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { data: { list: [] } } as any;
+      return await res.json();
+    }
+  });
+
   // Sync local GA property state when connections load/update
   useEffect(() => {
     const conn = (connections as any)?.google_analytics;
@@ -250,8 +262,7 @@ export default function Settings() {
           authUrl = `/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'tiktok':
-          toast({ title: 'Bilgi', description: 'TikTok entegrasyonu yakında eklenecek.' });
-          return;
+          authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_search_console':
           toast({ title: 'Bilgi', description: 'Search Console entegrasyonu yakında eklenecek.' });
@@ -703,6 +714,56 @@ export default function Settings() {
                                         )}
                                         {(metaAdAccounts?.data || []).map((acc: any) => (
                                           <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.id}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                                {/* TikTok Ads hesap seçimi */}
+                                {platform.id === 'tiktok' && isConnected && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                      {(connections as any)?.tiktok?.accountId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).tiktok.accountId}</span>
+                                      )}
+                                    </div>
+                                    <Select
+                                      value={(connections as any)?.tiktok?.accountId || ''}
+                                      onValueChange={async (value) => {
+                                        const uid = (user as any)?.uid || (user as any)?.id;
+                                        try {
+                                          const resp = await apiRequest('POST', '/api/connections', {
+                                            platform: 'tiktok',
+                                            accountId: value,
+                                            userId: uid,
+                                          });
+                                          await resp.json();
+                                          toast({ title: 'Başarılı', description: 'TikTok reklam hesabı güncellendi' });
+                                          queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                            ...(prev || {}),
+                                            tiktok: {
+                                              ...((prev && prev.tiktok) || {}),
+                                              accountId: value,
+                                              isConnected: true,
+                                            },
+                                          }));
+                                        } catch (e) {
+                                          toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                        }
+                                      }}
+                                    >
+                                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                        <SelectValue placeholder={!tiktokAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
+                                      </SelectTrigger>
+                                      <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                        {!((tiktokAdAccounts?.data?.list || []).length) && (
+                                          <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                        )}
+                                        {(tiktokAdAccounts?.data?.list || []).map((acc: any) => (
+                                          <SelectItem key={(acc.advertiser_id || acc.id)} value={String(acc.advertiser_id || acc.id)}>
+                                            {acc.advertiser_name || acc.name || String(acc.advertiser_id || acc.id)}
+                                          </SelectItem>
                                         ))}
                                       </SelectContent>
                                     </Select>

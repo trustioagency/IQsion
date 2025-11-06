@@ -12,6 +12,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
 const AIChatPanel = lazy(() => import("../components/ai-chat-panel"));
 import Header from "../components/layout/header";
+import StartGuide from "../components/start-guide";
 import { useLanguage } from "../contexts/LanguageContext";
 import {
   DollarSign, Target, ShoppingCart, TrendingUp, BarChart3, Users, Layers, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity,
@@ -53,6 +54,7 @@ export default function Dashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const { t, language } = useLanguage();
+  const [showStartGuide, setShowStartGuide] = useState(false);
   const [dateRange, setDateRange] = useState<DateRangeKey>('30d');
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<DateRangeKey>('30d');
@@ -75,6 +77,41 @@ export default function Dashboard() {
     const label = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
     return { pct, type, label } as { pct: number; type: 'positive' | 'negative'; label: string };
   };
+
+  // Open Start Guide if onboarding not completed locally and basic status suggests it's needed
+  useEffect(() => {
+    if (!user || authLoading) return;
+    try {
+      const done = typeof window !== 'undefined' && window.localStorage.getItem('iq_onboarding_completed') === '1';
+      if (done) return;
+    } catch {}
+    const check = async () => {
+      try {
+        const url = new URL('/api/onboarding/status', window.location.origin);
+        if (user?.uid) url.searchParams.set('userId', user.uid);
+        const res = await fetch(url.toString(), { credentials: 'include' });
+        const j = await res.json();
+        const anyConnection = !!(j?.connections?.shopify || j?.connections?.google_analytics || j?.connections?.meta_ads || j?.connections?.google_ads);
+        const pixelSeen = !!j?.pixel?.lastSeenAt;
+        const hasProfile = !!j?.profile?.hasProfile;
+        const needsOnboarding = !(anyConnection && (pixelSeen || hasProfile));
+        if (needsOnboarding) setShowStartGuide(true);
+      } catch (e) {
+        // ignore
+      }
+    };
+    check();
+  }, [user, authLoading]);
+
+  // Listen to manual open request from Header menu
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => setShowStartGuide(true);
+    window.addEventListener('iq:open-start-guide', handler as any);
+    return () => {
+      window.removeEventListener('iq:open-start-guide', handler as any);
+    };
+  }, []);
 
   // Helpers: resolve current absolute range and its previous range with equal length
   const getCurrentRangeDates = (key: DateRangeKey) => {
@@ -1341,6 +1378,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+      <StartGuide open={showStartGuide} onOpenChange={setShowStartGuide} userId={user?.uid} />
     </div>
   );
 }

@@ -19,6 +19,44 @@ async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 1000
 }
 const router = express.Router();
 
+// --- TikTok site verification (URL prefix) ---
+// Serve a plain text file at the path TikTok expects, content from env
+const TIKTOK_SITE_VERIFY_PATH = (process.env.TIKTOK_SITE_VERIFY_PATH || '/tiktok-developer-verify.txt').trim();
+const TIKTOK_SITE_VERIFY_CONTENT = (process.env.TIKTOK_SITE_VERIFY_CONTENT || '').trim();
+const defaultVerifyPaths = ['/tiktok-developers-site-verification.txt', '/tiktok-developer-verify.txt'];
+let envVerifyPath = (process.env.TIKTOK_SITE_VERIFY_PATH || '').trim();
+if (!envVerifyPath || !envVerifyPath.startsWith('/')) envVerifyPath = '';
+const possibleVerifyPaths = Array.from(new Set([envVerifyPath, ...defaultVerifyPaths].filter(Boolean)));
+for (const p of possibleVerifyPaths) {
+  router.get(p, async (_req, res) => {
+    // Load content lazily at request time to avoid import-order issues
+    let content = (process.env.TIKTOK_SITE_VERIFY_CONTENT || '').trim();
+    if (!content) {
+      try {
+        const here = path.dirname(new URL(import.meta.url).pathname);
+        const candidates = [
+          path.resolve(process.cwd(), 'server', 'env'),
+          path.resolve(process.cwd(), 'Maint', 'server', 'env'),
+          path.resolve(here, 'env'),
+        ];
+        for (const fp of candidates) {
+          try {
+            const r = dotenv.config({ path: fp });
+            if (!r.error) {
+              content = (process.env.TIKTOK_SITE_VERIFY_CONTENT || '').trim();
+              if (content) break;
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    if (!content) {
+      return res.status(404).type('text/plain').send('TikTok verification content not configured. Set TIKTOK_SITE_VERIFY_CONTENT in env.');
+    }
+    return res.type('text/plain').send(content);
+  });
+}
+
 // --- AI: Chat endpoint (Gemini via REST) ---
 
 router.post('/api/ai/chat', async (req, res) => {
@@ -215,6 +253,120 @@ router.post('/api/ai/chat', async (req, res) => {
     const msg = err?.message || String(err);
     console.error('[AI CHAT ERROR]', msg);
     return res.status(500).json({ message: 'AI chat failed', error: msg });
+  }
+});
+
+// --- Onboarding + Pixel Tracking ---
+// Generate a unique pixel for the user (idempotent)
+router.post('/api/pixel/create', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const existing = (await admin.database().ref(`pixels/${uid}`).once('value')).val();
+    if (existing?.pixelId) {
+      return res.json({ pixelId: existing.pixelId, createdAt: existing.createdAt, lastSeenAt: existing.lastSeenAt || null, scriptUrl: `${process.env.APP_URL || ''}/p.js?pid=${existing.pixelId}` });
+    }
+    const pixelId = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+    const createdAt = Date.now();
+    await admin.database().ref(`pixels/${uid}`).set({ pixelId, createdAt, lastSeenAt: null });
+    await admin.database().ref(`pixelMap/${pixelId}`).set({ uid });
+    return res.json({ pixelId, createdAt, lastSeenAt: null, scriptUrl: `${process.env.APP_URL || ''}/p.js?pid=${pixelId}` });
+  } catch (err) {
+    return res.status(500).json({ message: 'Pixel oluşturulamadı', error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Pixel status for onboarding UI
+router.get('/api/pixel/status', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const p = (await admin.database().ref(`pixels/${uid}`).once('value')).val();
+    if (!p) return res.json({ hasPixel: false });
+    return res.json({ hasPixel: true, pixelId: p.pixelId, lastSeenAt: p.lastSeenAt || null, scriptUrl: `${process.env.APP_URL || ''}/p.js?pid=${p.pixelId}` });
+  } catch (err) {
+    return res.status(500).json({ message: 'Pixel durumu alınamadı', error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Onboarding status: connections, pixel, profile
+router.get('/api/onboarding/status', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const connectionsSnap = await admin.database().ref(`platformConnections/${uid}`).once('value');
+    const connections = connectionsSnap.val() || {};
+    const pixel = (await admin.database().ref(`pixels/${uid}`).once('value')).val() || null;
+    const profile = (await admin.database().ref(`brandProfiles/${uid}`).once('value')).val() || {};
+    const status = {
+      connections: {
+        shopify: !!connections.shopify?.isConnected,
+        google_analytics: !!connections.google_analytics?.accessToken,
+        meta_ads: !!connections.meta_ads?.isConnected,
+        google_ads: !!connections.google_ads?.isConnected,
+      },
+      pixel: {
+        hasPixel: !!pixel?.pixelId,
+        lastSeenAt: pixel?.lastSeenAt || null,
+      },
+      profile: {
+        hasProfile: Boolean(profile?.industry || profile?.companyName || profile?.companySize),
+      }
+    };
+    return res.json(status);
+  } catch (err) {
+    return res.status(500).json({ message: 'Onboarding durumu alınamadı', error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Tracking script (public)
+router.get('/p.js', async (req, res) => {
+  const pid = String(req.query.pid || '').trim();
+  if (!pid) return res.status(400).type('text/plain').send('/* missing pid */');
+  const appUrl = process.env.APP_URL || `${req.protocol}://${(req.get('host') || '').replace('127.0.0.1','localhost')}`;
+  const js = `(()=>{try{const pid='${pid}';const u='${appUrl}';const send=e=>{const i=new Image();const p=new URL(u+'/c.gif');Object.entries(e).forEach(([k,v])=>p.searchParams.set(k, String(v)));i.src=p.toString();};
+  const ev={pid, e:'pv', url:location.href, ref:document.referrer, tz:Intl.DateTimeFormat().resolvedOptions().timeZone||'', ts:Date.now()};
+  send(ev);
+  window.IQsionPixel={track:(name,props)=>send({pid,e:name,...(props||{}),url:location.href,ts:Date.now()})};
+}catch(e){}})();`;
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  return res.send(js);
+});
+
+// Collector 1x1 gif
+router.get('/c.gif', async (req, res) => {
+  try {
+    const pid = String(req.query.pid || '').trim();
+    if (!pid) return res.status(400).end();
+    const mapSnap = await admin.database().ref(`pixelMap/${pid}`).once('value');
+    const map = mapSnap.val();
+    const uid = map?.uid;
+    if (!uid) return res.status(404).end();
+    const now = Date.now();
+    const payload = {
+      pid,
+      e: String(req.query.e || 'pv'),
+      url: String(req.query.url || ''),
+      ref: String(req.query.ref || ''),
+      tz: String(req.query.tz || ''),
+      ua: req.get('user-agent') || '',
+      ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '',
+      ts: Number(req.query.ts || now),
+    };
+    await admin.database().ref(`rawEvents/${uid}`).push(payload);
+    await admin.database().ref(`pixels/${uid}`).update({ lastSeenAt: now });
+  } catch (_) {
+    // swallow errors for collector
+  } finally {
+    const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64');
+    res.setHeader('Content-Type', 'image/gif');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    return res.end(gif);
   }
 });
 
@@ -1234,6 +1386,45 @@ router.get('/api/googleads/accounts', async (req, res) => {
       developer_token: developerToken,
     });
 
+    // Proactive token refresh if expired (access token lifetime ~1h). We refresh if > (expiresIn-60s)
+    try {
+      if (refreshToken && googleAdsConn.expiresIn && googleAdsConn.createdAt) {
+        const ageMs = Date.now() - Number(googleAdsConn.createdAt);
+        const ttlMs = (Number(googleAdsConn.expiresIn) - 60) * 1000; // refresh 60s early
+        if (ageMs > ttlMs) {
+          const params = new URLSearchParams();
+          params.append('client_id', process.env.GOOGLE_ADS_CLIENT_ID || '');
+          params.append('client_secret', process.env.GOOGLE_ADS_CLIENT_SECRET || '');
+          params.append('refresh_token', refreshToken);
+          params.append('grant_type', 'refresh_token');
+          const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+          });
+          const tokenJson = await tokenResp.json();
+          if (tokenResp.ok && tokenJson.access_token) {
+            await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+              accessToken: tokenJson.access_token,
+              expiresIn: tokenJson.expires_in,
+              updatedAt: new Date().toISOString(),
+              createdAt: Date.now(),
+            });
+            console.log('[GoogleAds REFRESH] access token yenilendi (accounts endpoint).');
+          } else {
+            console.warn('[GoogleAds REFRESH] refresh başarısız:', tokenJson);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[GoogleAds REFRESH] hata:', e);
+    }
+
+    // Re-read accessToken if we refreshed
+    const freshSnap = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
+    const freshConn = freshSnap.val();
+    const effectiveAccessToken = freshConn?.accessToken || accessToken;
+
     // 1) If MCC (loginCustomerId) is provided, prefer GAQL to fetch sub-accounts with names
     if (loginCustomerId && refreshToken) {
       try {
@@ -1256,7 +1447,7 @@ router.get('/api/googleads/accounts', async (req, res) => {
       const r = await fetch(url, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${effectiveAccessToken}`,
           'developer-token': developerToken,
         },
       });
@@ -1389,6 +1580,39 @@ router.get('/api/googleads/summary', async (req, res) => {
     const until = endDate || fmt(yesterday);
 
     // GAQL ile günlük metrikleri çek (hesap seviyesi)
+    // Proactive refresh before GAQL if needed
+    try {
+      if (gaConn?.refreshToken && gaConn?.expiresIn && gaConn?.createdAt) {
+        const ageMs = Date.now() - Number(gaConn.createdAt);
+        const ttlMs = (Number(gaConn.expiresIn) - 60) * 1000;
+        if (ageMs > ttlMs) {
+          const params = new URLSearchParams();
+          params.append('client_id', process.env.GOOGLE_ADS_CLIENT_ID || '');
+          params.append('client_secret', process.env.GOOGLE_ADS_CLIENT_SECRET || '');
+          params.append('refresh_token', gaConn.refreshToken);
+          params.append('grant_type', 'refresh_token');
+          const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString()
+          });
+          const tokenJson = await tokenResp.json();
+          if (tokenResp.ok && tokenJson.access_token) {
+            await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+              accessToken: tokenJson.access_token,
+              expiresIn: tokenJson.expires_in,
+              updatedAt: new Date().toISOString(),
+              createdAt: Date.now(),
+            });
+            gaConn.accessToken = tokenJson.access_token;
+            console.log('[GoogleAds REFRESH] access token yenilendi (summary endpoint).');
+          } else {
+            console.warn('[GoogleAds REFRESH] refresh başarısız:', tokenJson);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[GoogleAds REFRESH] hata (summary):', e);
+    }
+
     const client = new GoogleAdsApi({
       client_id: process.env.GOOGLE_ADS_CLIENT_ID || '',
       client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET || '',
@@ -1416,7 +1640,22 @@ router.get('/api/googleads/summary', async (req, res) => {
     try {
       rows = await customer.query(gaql);
     } catch (e: any) {
-      return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: e?.message || String(e) });
+      const msg = e?.message ? String(e.message) : String(e);
+      // If refresh token is revoked/invalid, surface a clear 401 and mark as disconnected
+      if (/invalid_grant/i.test(msg) || /UNAUTHENTICATED/i.test(msg)) {
+        try {
+          await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+            isConnected: false,
+            lastError: 'invalid_grant',
+            lastErrorAt: new Date().toISOString(),
+          });
+        } catch (_) {}
+        return res.status(401).json({
+          message: 'Google Ads oturumunun süresi dolmuş. Lütfen Ayarlar > Google Ads bölümünden yeniden bağlanın.',
+          details: 'invalid_grant',
+        });
+      }
+      return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: msg });
     }
 
     // Günlük satırlar + toplamlar
@@ -1520,6 +1759,17 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   }
 });
 
+// Google Ads bağlantısını temizleyen (disconnect) endpoint
+router.post('/api/googleads/disconnect', async (req, res) => {
+  try {
+    const userId = (req.body.userId as string) || 'test-user';
+    await admin.database().ref(`platformConnections/${userId}/google_ads`).remove();
+    return res.json({ message: 'Google Ads bağlantısı silindi.' });
+  } catch (e) {
+    return res.status(500).json({ message: 'Google Ads bağlantısı silinemedi', error: String(e) });
+  }
+});
+
 // ...existing code...
   // Reklam hesabı seçimini güncelleyen endpoint
   router.post('/api/connections', async (req, res) => {
@@ -1565,6 +1815,15 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
           await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
         }
         return res.json({ message: 'Google Ads bağlantısı güncellendi.', accountId, loginCustomerId });
+      }
+      // TikTok reklam hesabı güncelleme
+      if (platform === 'tiktok') {
+        const accountId = req.body.accountId;
+        if (!accountId) {
+          return res.status(400).json({ message: 'Reklam hesabı ID eksik.' });
+        }
+        await admin.database().ref(`platformConnections/${userId}/tiktok/accountId`).set(accountId);
+        return res.json({ message: 'TikTok reklam hesabı güncellendi.', accountId });
       }
       return res.status(400).json({ message: 'Desteklenmeyen platform.' });
     } catch (error) {
@@ -1931,6 +2190,120 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       res.json(connections);
     } catch (error) {
       res.status(500).json({ message: 'Bağlantı durumu alınamadı', error });
+    }
+  });
+
+  // --- TikTok Ads OAuth: Connect ---
+  router.get('/api/auth/tiktok/connect', async (req, res) => {
+    try {
+      const clientKey = process.env.TIKTOK_CLIENT_KEY || '';
+      if (!clientKey) {
+        return res.status(400).send('TikTok client key eksik (TIKTOK_CLIENT_KEY).');
+      }
+      const rawHost = req.get('host') || 'localhost:5001';
+      const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+      const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/tiktok/callback`;
+      const redirectEnv = process.env.TIKTOK_REDIRECT_URI;
+      const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+      const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
+      const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+      const scope = [
+        'ads.read',
+        'ads.management',
+        'report.data',
+        'ad.account.read'
+      ].join(',');
+      const authUrl =
+        `https://business-api.tiktok.com/open_api/v1.3/oauth2/authorize?` +
+        `client_key=${encodeURIComponent(clientKey)}` +
+        `&scope=${encodeURIComponent(scope)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&state=${encodeURIComponent(stateRaw)}`;
+      return res.redirect(authUrl);
+    } catch (e) {
+      return res.status(500).send('TikTok connect hatası: ' + (e as any)?.message || String(e));
+    }
+  });
+
+  // --- TikTok Ads OAuth: Callback ---
+  router.get('/api/auth/tiktok/callback', async (req, res) => {
+    try {
+      const code = String(req.query.code || '');
+      const stateParam = String(req.query.state || '');
+      if (!code) {
+        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+      }
+      let stateUserId: string | null = null;
+      if (stateParam) {
+        try {
+          const decoded = decodeURIComponent(stateParam);
+          if (decoded.startsWith('uid:')) stateUserId = decoded.split('|')[0].replace('uid:', '');
+        } catch (_) {}
+      }
+      const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
+
+      const clientKey = process.env.TIKTOK_CLIENT_KEY || '';
+      const clientSecret = process.env.TIKTOK_CLIENT_SECRET || '';
+      if (!clientKey || !clientSecret) {
+        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+      }
+
+      // Token exchange
+      const tokenUrl = 'https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/';
+      const tokenResp = await fetchWithTimeout(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_key: clientKey, client_secret: clientSecret, code, grant_type: 'authorization_code' }),
+      }, 15000);
+      const tokenJson: any = await tokenResp.json();
+      if (!tokenResp.ok || !tokenJson?.data?.access_token) {
+        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+      }
+      const accessToken: string = tokenJson.data.access_token;
+      const refreshToken: string | null = tokenJson.data.refresh_token || null;
+      const expiresIn: number | null = tokenJson.data.expires_in || null;
+
+      // Fetch advertiser list (optional)
+      let advertiserIds: string[] = [];
+      try {
+        const advUrl = `https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/?access_token=${encodeURIComponent(accessToken)}`;
+        const advResp = await fetchWithTimeout(advUrl, { method: 'GET' }, 15000);
+        const advJson: any = await advResp.json();
+        const list: any[] = advJson?.data?.list || [];
+        advertiserIds = list.map((it: any) => String(it.advertiser_id || it.advertiser_id_str || it.advertiser_id_encrypted || it.id)).filter(Boolean);
+      } catch (_) {}
+
+      await admin.database().ref(`platformConnections/${userId}/tiktok`).set({
+        isConnected: true,
+        platform: 'tiktok',
+        accessToken,
+        refreshToken,
+        expiresIn,
+        advertiserIds,
+        accountId: advertiserIds[0] || null,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=tiktok")</script>');
+    } catch (e) {
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+    }
+  });
+
+  // TikTok: Kullanıcının reklam hesaplarını listele
+  router.get('/api/tiktok/adaccounts', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snap = await admin.database().ref(`platformConnections/${userId}/tiktok`).once('value');
+      const tk = snap.val();
+      const accessToken = tk?.accessToken || '';
+      if (!accessToken) return res.status(400).json({ message: 'TikTok access token bulunamadı.' });
+      const url = `https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/?access_token=${encodeURIComponent(accessToken)}`;
+      const r = await fetchWithTimeout(url, { method: 'GET' }, 15000);
+      const j = await r.json();
+      return res.json(j);
+    } catch (e) {
+      return res.status(500).json({ message: 'TikTok adaccounts alınamadı', error: String(e) });
     }
   });
   // Google Analytics veri çekme endpointi

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Badge } from "../ui/badge";
-import { Bell, User, Settings, LogOut } from "lucide-react";
+import { Bell, User, Settings, LogOut, Sparkles } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { type User as UserType } from "../../types/user";
 import { useIsMobile } from "../../hooks/use-mobile";
@@ -143,6 +143,20 @@ export default function Header({ currentPage }: HeaderProps) {
               </div>
 
               <DropdownMenuSeparator className="bg-slate-700" />
+
+              <DropdownMenuItem 
+                onClick={() => {
+                  try {
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(new CustomEvent('iq:open-start-guide'));
+                    }
+                  } catch (e) { /* no-op */ }
+                }}
+                className="text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                {t('onboardingStart')}
+              </DropdownMenuItem>
 
               <DropdownMenuItem 
                 onClick={() => navigate('/settings')}
