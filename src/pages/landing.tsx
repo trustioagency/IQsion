@@ -33,12 +33,22 @@ export default function Landing() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
 
+  // Auth actions should go to app subdomain ONLY in production domains.
+  // In local dev (localhost:5173) we must stay local to avoid unwanted redirects.
+  const appBase = (() => {
+    if (typeof window === 'undefined') return '';
+    const host = window.location.hostname;
+    const isProdHost = ['iqsion.com', 'www.iqsion.com', 'app.iqsion.com'].includes(host);
+    if (!isProdHost) return '';
+    return host !== 'app.iqsion.com' ? 'https://app.iqsion.com' : '';
+  })();
+
   const handleLogin = () => {
-    window.location.href = '/auth';
+    window.location.href = `${appBase}/auth`;
   };
 
   const handleStartTrial = () => {
-    window.location.href = '/api/login';
+    window.location.href = `${appBase}/api/login`;
   };
 
   const handleSendMessage = () => {
@@ -506,7 +516,7 @@ export default function Landing() {
           <div className="flex flex-col sm:flex-row justify-center gap-4">
             <Button 
               size="lg"
-              onClick={() => window.location.href = '/auth'}
+              onClick={() => (window.location.href = `${appBase}/auth`)}
               className="bg-white text-blue-600 px-8 py-4 rounded-xl font-bold text-lg hover:bg-gray-100"
             >
               Ücretsiz Denemeyi Başlat

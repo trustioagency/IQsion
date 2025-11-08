@@ -1,4 +1,15 @@
+# Local env files
+.env*
+server/*-firebase-adminsdk-*.json
+
+# Node
 node_modules
+dist
+npm-debug.log
+
+# Editor
+.DS_Store
+.vscodenode_modules
 dist
 .DS_Store
 server/public

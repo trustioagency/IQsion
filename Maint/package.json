@@ -5,13 +5,17 @@
   "license": "MIT",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx watch server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+  "build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "cross-env NODE_ENV=production node dist/index.js",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "deploy:api": "gcloud run deploy iqsion-api --source . --region us-central1 --allow-unauthenticated --set-env-vars \"$(cat .env.production | grep -v '^#' | xargs)\""
   },
   "dependencies": {
-  "google-ads-api": "^21.0.1",
+    "google-ads-api": "^21.0.1",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.6.0",
     "@google/genai": "^1.11.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
@@ -55,7 +59,7 @@
     "embla-carousel-react": "^8.6.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "firebase": "^12.2.1",
+  "firebase": "^12.2.1",
     "framer-motion": "^11.13.1",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.453.0",

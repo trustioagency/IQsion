@@ -4,7 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "dev:all": "concurrently -k -n FRONT,API -c green,cyan \"npm run dev\" \"npm --prefix Maint run dev\""
+    "dev:all": "concurrently -k -n FRONT,API -c green,cyan \"npm run dev\" \"npm --prefix Maint run dev\"",
+    "build": "vite build",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting:maint-ca347",
+    "deploy:hosting:all": "npm run build && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b",
+    "deploy:all": "npm run build && npm --prefix Maint run build && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",
@@ -49,6 +53,7 @@
     "@vitejs/plugin-react": "^5.0.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
+    "firebase-tools": "^13.29.0",
     "tsx": "^4.20.3",
     "typescript": "^5.6.3"
   }

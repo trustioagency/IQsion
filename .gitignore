@@ -5,6 +5,8 @@ build/
 .env
 Maint/server/env
 Maint/server/*.json
+Maint/.env*
+Maint/.env.production
 *.log
 *.tmp
 

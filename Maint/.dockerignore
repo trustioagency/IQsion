@@ -1,0 +1,20 @@
+# Prevent secrets and dev-only files from being copied into the container
+server/*-firebase-adminsdk-*.json
+server/env
+
+# Typical ignores
+node_modules
+npm-debug.log
+.git
+.gitignore
+distnode_modules
+dist
+**/*.log
+.git
+.gitignore
+Dockerfile
+firebase.json
+firebaserc
+*.local
+*.env
+server/env

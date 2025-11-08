@@ -19,6 +19,74 @@ async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 1000
 }
 const router = express.Router();
 
+// Helper: settings redirect (avoids hard-coded localhost in production)
+function buildAppBase(req: express.Request) {
+  // Prefer explicit APP_URL env (e.g., https://app.iqsion.com)
+  let appUrl = (process.env.APP_URL || '').trim().replace(/\/$/, '');
+  if (!appUrl) {
+    // Derive from host header; force https for non-localhost
+    const host = (req.get('host') || '').replace('127.0.0.1', 'localhost');
+    const isLocal = /localhost|127\.0\.0\.1/.test(host);
+    appUrl = (isLocal ? (req.protocol + '://' + host.replace(/:\d+$/, ':5173')) : ('https://' + host.replace(/:.*$/, '')));
+  }
+  return appUrl;
+}
+function settingsRedirect(res: express.Response, req: express.Request, platform: string, ok: boolean) {
+  const base = buildAppBase(req);
+  const status = ok ? 'success' : 'error';
+  // SPA içi yönlendirme: window.location.replace ile döndür (callback domaini API olduğu için HTML <script> en garanti yöntem)
+  return res.send(`<script>window.location.replace('${base}/settings?connection=${status}&platform=${encodeURIComponent(platform)}')</script>`);
+}
+
+// Debug endpoint: expose (masked) env presence and computed redirect URIs for OAuth flows
+// Helps diagnose "client_id=undefined" veya yanlış redirect sorunları lokal & prod.
+router.get('/api/auth/debug', (req, res) => {
+  const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1','localhost');
+  const proto = req.protocol || 'http';
+  const base = `${proto}://${host}`;
+  const mask = (v?: string) => {
+    if (!v) return null;
+    const raw = v.trim().replace(/^"|"$/g,'');
+    if (raw.length <= 8) return raw.replace(/./g,'*');
+    return raw.slice(0,4) + '...' + raw.slice(-4);
+  };
+  const data = {
+    host,
+    base,
+    computed: {
+      googleAnalyticsRedirect: `${base}/api/auth/google/callback`,
+      googleAdsRedirect: `${base}/api/auth/googleads/callback`,
+      searchConsoleRedirect: `${base}/api/auth/searchconsole/callback`,
+      metaRedirect: `${base}/api/auth/meta/callback`,
+      shopifyRedirect: `${base}/api/auth/shopify/callback`,
+      tiktokRedirect: `${base}/api/auth/tiktok/callback`,
+    },
+    env: {
+      GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || null,
+      GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || null,
+      GOOGLE_ADS_CLIENT_ID: process.env.GOOGLE_ADS_CLIENT_ID || null,
+      GOOGLE_ADS_REDIRECT_URI: process.env.GOOGLE_ADS_REDIRECT_URI || null,
+      GOOGLE_SC_CLIENT_ID: process.env.GOOGLE_SC_CLIENT_ID || null,
+      GOOGLE_SC_REDIRECT: process.env.GOOGLE_SC_REDIRECT || null,
+      META_APP_ID: process.env.META_APP_ID || null,
+      META_REDIRECT_URI: process.env.META_REDIRECT_URI || null,
+      SHOPIFY_API_KEY: mask(process.env.SHOPIFY_API_KEY),
+      SHOPIFY_REDIRECT_URI: process.env.SHOPIFY_REDIRECT_URI || null,
+      TIKTOK_CLIENT_KEY: mask(process.env.TIKTOK_CLIENT_KEY),
+      TIKTOK_REDIRECT_URI: process.env.TIKTOK_REDIRECT_URI || null,
+      CORS_ORIGINS: process.env.CORS_ORIGINS || null,
+      APP_URL: process.env.APP_URL || null,
+      NODE_ENV: process.env.NODE_ENV || null,
+    },
+    notes: [
+      'Lokal ortamda OAuth provider ayarlarında aşağıdaki callback URLlerinin kayıtlı olduğundan emin olun.',
+      'client_id=undefined sorunu genelde env dosyasının yüklenmemesi veya değişken adının paneldekiyle farklı olmasından kaynaklanır.',
+      'TikTok için local testte TIKTOK_REDIRECT_URI değerini cloudflare tüneli yerine localhost kullanın.',
+    ]
+  };
+  res.json(data);
+});
+
 // --- TikTok site verification (URL prefix) ---
 // Serve a plain text file at the path TikTok expects, content from env
 const TIKTOK_SITE_VERIFY_PATH = (process.env.TIKTOK_SITE_VERIFY_PATH || '/tiktok-developer-verify.txt').trim();
@@ -688,20 +756,43 @@ router.post('/api/auth/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ message: 'E-posta ve şifre zorunlu.' });
   }
+  const isDev = process.env.NODE_ENV !== 'production';
   try {
-    // Firebase ile kullanıcıyı bul
-    const user = await admin.auth().getUserByEmail(email);
-    // Şifre kontrolü için Firebase Auth REST API kullanılmalı
-    // Test ortamı için basit kontrol: şifreyi veritabanında saklıyorsanız karşılaştırabilirsiniz
-    const userDataSnap = await admin.database().ref(`users/${user.uid}`).once('value');
-    const userData = userDataSnap.val();
-    if (!userData || userData.password !== password) {
-      return res.status(401).json({ message: 'E-posta veya şifre hatalı.' });
+    let userRecord: any | null = null;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+    } catch (e: any) {
+      const code = (e?.code || '').toString();
+      // Lokal geliştirmeyi hızlandırmak için: kullanıcı yoksa otomatik oluştur (yalnızca development)
+      if (isDev && code.includes('auth/user-not-found')) {
+        userRecord = await admin.auth().createUser({ email, password, displayName: '' });
+        await admin.database().ref(`users/${userRecord.uid}`).set({ email, password, createdAt: Date.now() });
+      } else {
+        throw e;
+      }
     }
-    return res.json({ message: 'Giriş başarılı', uid: user.uid });
+
+    // Şifre kontrolü (yalnız dev amaçlı basit kontrol). Prod için gerçek Auth REST akışı önerilir.
+    const uid = userRecord.uid as string;
+    const snap = await admin.database().ref(`users/${uid}`).once('value');
+    let userData = snap.val();
+    if (!userData || userData.password !== password) {
+      if (isDev) {
+        // Lokal uyum için şifre kaydını otomatik düzelt
+        await admin.database().ref(`users/${uid}`).update({ email, password, updatedAt: Date.now() });
+        userData = { email, password };
+      } else {
+        return res.status(401).json({ message: 'E-posta veya şifre hatalı.' });
+      }
+    }
+    return res.json({ message: 'Giriş başarılı', uid });
   } catch (error) {
     console.error('[LOGIN ERROR]', error);
-    return res.status(401).json({ message: 'Giriş başarısız', error: error instanceof Error ? error.message : String(error) });
+    // ADC eksik ise yol gösterici mesaj
+    const hint = (error instanceof Error && /project/i.test(error.message) && /credentials|projectId|initializeApp/i.test(error.message))
+      ? 'Lokal için Firebase Admin kimlik bilgilerini ayarlayın: GOOGLE_APPLICATION_CREDENTIALS veya `gcloud auth application-default login`'
+      : undefined;
+    return res.status(401).json({ message: 'Giriş başarısız', error: error instanceof Error ? error.message : String(error), hint });
   }
 });
 
@@ -768,9 +859,9 @@ router.get('/api/auth/shopify/callback', async (req, res) => {
       ...(Date.now() ? { createdAt: Date.now() } : {}),
     });
     // Kullanıcıyı ayarlar sayfasına yönlendir
-    res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=shopify")</script>');
+    return settingsRedirect(res, req, 'shopify', true);
   } catch (err) {
-    res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=shopify")</script>');
+  return settingsRedirect(res, req, 'shopify', false);
   }
 });
 
@@ -1640,7 +1731,8 @@ router.get('/api/googleads/summary', async (req, res) => {
     try {
       rows = await customer.query(gaql);
     } catch (e: any) {
-      const msg = e?.message ? String(e.message) : String(e);
+      const msg = e?.message ? String(e.message) : (typeof e === 'object' ? JSON.stringify(e) : String(e));
+      console.error('[GoogleAds GAQL ERROR]', { message: msg, raw: e, gaql, accountId, loginCustomerId });
       // If refresh token is revoked/invalid, surface a clear 401 and mark as disconnected
       if (/invalid_grant/i.test(msg) || /UNAUTHENTICATED/i.test(msg)) {
         try {
@@ -1655,7 +1747,7 @@ router.get('/api/googleads/summary', async (req, res) => {
           details: 'invalid_grant',
         });
       }
-      return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: msg });
+      return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: msg, gaql });
     }
 
     // Günlük satırlar + toplamlar
@@ -1694,7 +1786,11 @@ router.get('/api/googleads/summary', async (req, res) => {
 
 // Google Ads OAuth bağlantı endpointi
 router.get('/api/auth/googleads/connect', async (req: express.Request, res: express.Response) => {
-  const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
+  // Be tolerant: fall back to generic GOOGLE_CLIENT_ID if Ads-specific var missing
+  const clientId = process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).json({ message: 'GOOGLE_ADS_CLIENT_ID not set (and no GOOGLE_CLIENT_ID fallback). Use Cloud Run env or .env.production.' });
+  }
   // Normalize host and compute redirect dynamically to avoid port mismatches (e.g., 5000 vs 5001)
   const rawHost = req.get('host') || 'localhost:5001';
   const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
@@ -1706,6 +1802,7 @@ router.get('/api/auth/googleads/connect', async (req: express.Request, res: expr
   const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${encodeURIComponent(stateRaw)}`;
   console.log('[GOOGLE ADS CONNECT] redirectUri=', redirectUri, 'state=', stateRaw);
+  if (!redirectUri) return res.status(500).json({ message: 'Redirect URI missing for Google Ads OAuth' });
   res.redirect(authUrl);
 });
 
@@ -1715,8 +1812,9 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
   if (!code) return res.status(400).send('Google OAuth kodu eksik.');
   try {
-    const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
+  // Mirror fallback logic from connect
+  const clientId = process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
     // Use same normalization logic as in connect
     const rawHost = req.get('host') || 'localhost:5001';
     const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
@@ -1753,7 +1851,7 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   createdAt: Date.now(),
   isConnected: true,
     });
-  res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=google_ads")</script>');
+  return settingsRedirect(res, req, 'google_ads', true);
   } catch (err) {
     res.status(500).send('Google Ads token alma hatası: ' + err);
   }
@@ -1776,6 +1874,16 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     try {
       const userId = req.body.userId || 'test-user';
       const platform = req.body.platform;
+      // Search Console: selected site kaydet
+      if (platform === 'search_console') {
+        const siteUrl = req.body.siteUrl;
+        if (!siteUrl || typeof siteUrl !== 'string') {
+          return res.status(400).json({ message: 'siteUrl eksik.' });
+        }
+        await admin.database().ref(`platformConnections/${userId}/search_console/selectedSite`).set(siteUrl);
+        await admin.database().ref(`platformConnections/${userId}/search_console/updatedAt`).set(new Date().toISOString());
+        return res.json({ message: 'Search Console site seçimi güncellendi.', siteUrl });
+      }
       // Shopify mağaza adresi kaydetme
       if (platform === 'shopify') {
         const storeUrl = req.body.storeUrl;
@@ -1899,15 +2007,29 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   // Meta bağlantısını kaldırma endpointi
   router.post('/api/disconnect', async (req, res) => {
     try {
-      const userId = req.query.userId || req.body.userId || 'test-user';
-      const platform = req.query.platform || req.body.platform;
-      if (!platform) {
+      const userId = (req.query.userId || req.body.userId || 'test-user') as string;
+      const rawPlatform = (req.query.platform || req.body.platform) as string | undefined;
+      if (!rawPlatform) {
         return res.status(400).json({ message: 'Platform belirtilmedi.' });
       }
-      await admin.database().ref(`platformConnections/${userId}/${platform}`).remove();
-      res.json({ message: `${platform} bağlantısı kaldırıldı.` });
+      const normalize = (p: string) => {
+        const id = String(p).trim();
+        if (id === 'google_search_console') return 'search_console';
+        return id;
+      };
+      const platform = normalize(rawPlatform);
+      const refBase = admin.database().ref(`platformConnections/${userId}`);
+      // Remove normalized path
+      await refBase.child(platform).remove();
+      // Backwards-compat: if caller sent the other alias, remove both
+      if (rawPlatform === 'google_search_console') {
+        await refBase.child('google_search_console').remove().catch(() => {});
+      } else if (rawPlatform === 'search_console') {
+        await refBase.child('google_search_console').remove().catch(() => {});
+      }
+      return res.json({ message: `${platform} bağlantısı kaldırıldı.` });
     } catch (error) {
-      res.status(500).json({ message: 'Bağlantı kaldırılamadı', error });
+      return res.status(500).json({ message: 'Bağlantı kaldırılamadı', error: error instanceof Error ? error.message : String(error) });
     }
   });
   // Meta (Facebook/Instagram) reklam verisi çekme endpointi
@@ -2288,7 +2410,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const tokenJson: any = await tokenResp.json();
       if (!tokenResp.ok || tokenJson.error) {
         console.error('[SearchConsole TOKEN ERROR]', tokenJson);
-        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=search_console")</script>');
+  return settingsRedirect(res, req, 'search_console', false);
       }
       const accessToken = tokenJson.access_token;
       const refreshToken = tokenJson.refresh_token;
@@ -2315,10 +2437,10 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         updatedAt: new Date().toISOString()
       });
 
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=search_console")</script>');
+  return settingsRedirect(res, req, 'search_console', true);
     } catch (e) {
       console.error('[SearchConsole CALLBACK ERROR]', e);
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=search_console")</script>');
+  return settingsRedirect(res, req, 'search_console', false);
     }
   });
 
@@ -2438,6 +2560,26 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       return res.status(500).json({ message: 'Search Console sorgu hatası', error: String(e) });
     }
   });
+
+  // DEV: Debug endpoint to inspect Search Console connections across users
+  router.get('/api/debug/searchconsole', async (req, res) => {
+    try {
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ message: 'Not available in production' });
+      }
+      const snap = await admin.database().ref('platformConnections').once('value');
+      const all = snap.val() || {};
+      const summary = Object.keys(all).map(uid => ({
+        uid,
+        hasSearchConsole: !!all[uid]?.search_console,
+        selectedSite: all[uid]?.search_console?.selectedSite || null,
+        isConnected: all[uid]?.search_console?.isConnected || false,
+      }));
+      return res.json({ users: summary });
+    } catch (e) {
+      return res.status(500).json({ message: 'Debug error', error: String(e) });
+    }
+  });
   // Meta Reklam OAuth connect endpoint
   router.get('/api/auth/meta/connect', async (req, res) => {
     const clientId = process.env.META_APP_ID;
@@ -2486,7 +2628,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       } catch (_) {}
     }
     if (!code) {
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
+  return settingsRedirect(res, req, 'meta_ads', false);
     }
     try {
       const rawHost = req.get('host') || 'localhost:5001';
@@ -2502,7 +2644,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${params.toString()}`);
       const tokenData = await tokenRes.json();
       if (tokenData.error || !tokenData.access_token) {
-        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
+  return settingsRedirect(res, req, 'meta_ads', false);
       }
       // Short-lived token'ı long-lived ile değiştir
       let accessToken: string = tokenData.access_token;
@@ -2541,9 +2683,9 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         updatedAt: new Date().toISOString(),
       });
       console.log('[META CALLBACK] saved connection for userId=', userId, { accountId, accountName: accountName || undefined });
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=meta_ads")</script>');
+  return settingsRedirect(res, req, 'meta_ads', true);
     } catch (err) {
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=meta_ads")</script>');
+  return settingsRedirect(res, req, 'meta_ads', false);
     }
   });
   // Kullanıcının bağlantı durumlarını döndüren endpoint
@@ -2552,6 +2694,10 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const userId = req.query.userId || 'test-user';
       const snapshot = await admin.database().ref(`platformConnections/${userId}`).once('value');
       const connections = snapshot.val() || {};
+      // Normalize keys for frontend expectations
+      if (connections.search_console && !connections.google_search_console) {
+        connections.google_search_console = connections.search_console;
+      }
       res.json(connections);
     } catch (error) {
       res.status(500).json({ message: 'Bağlantı durumu alınamadı', error });
@@ -2596,7 +2742,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const code = String(req.query.code || '');
       const stateParam = String(req.query.state || '');
       if (!code) {
-        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+  return settingsRedirect(res, req, 'tiktok', false);
       }
       let stateUserId: string | null = null;
       if (stateParam) {
@@ -2610,7 +2756,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const clientKey = process.env.TIKTOK_CLIENT_KEY || '';
       const clientSecret = process.env.TIKTOK_CLIENT_SECRET || '';
       if (!clientKey || !clientSecret) {
-        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+  return settingsRedirect(res, req, 'tiktok', false);
       }
 
       // Token exchange
@@ -2622,7 +2768,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       }, 15000);
       const tokenJson: any = await tokenResp.json();
       if (!tokenResp.ok || !tokenJson?.data?.access_token) {
-        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+  return settingsRedirect(res, req, 'tiktok', false);
       }
       const accessToken: string = tokenJson.data.access_token;
       const refreshToken: string | null = tokenJson.data.refresh_token || null;
@@ -2649,9 +2795,9 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       });
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=tiktok")</script>');
+  return settingsRedirect(res, req, 'tiktok', true);
     } catch (e) {
-      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=tiktok")</script>');
+  return settingsRedirect(res, req, 'tiktok', false);
     }
   });
 
@@ -2868,7 +3014,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       }
     }
     if (!code) {
-      return res.redirect('http://localhost:5173/settings?connection=error&platform=google_analytics');
+  return settingsRedirect(res, req, 'google_analytics', false);
     }
     try {
       const params = new URLSearchParams();
@@ -2931,7 +3077,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      return res.redirect('http://localhost:5173/settings?connection=success&platform=google_analytics');
+  return settingsRedirect(res, req, 'google_analytics', true);
     } catch (err) {
       return res.redirect('/settings?connection=error&platform=google_analytics');
     }
@@ -2940,6 +3086,9 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   // Google Analytics OAuth connect endpoint
   router.get('/api/auth/google/connect', async (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({ message: 'GOOGLE_CLIENT_ID is not configured on the server.' });
+    }
     const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
     const scope = [
       'https://www.googleapis.com/auth/analytics.readonly',
@@ -2962,6 +3111,7 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       `&access_type=offline` +
       `&prompt=consent` +
       `&state=${state}`;
+    if (!redirectUri) return res.status(500).json({ message: 'GOOGLE_REDIRECT_URI is not configured and computed redirect failed.' });
     res.redirect(authUrl);
   });
 export default router;

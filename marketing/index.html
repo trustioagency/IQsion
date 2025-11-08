@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>IQsion - Pazarlama Zekası Platformu</title>
+  <meta name="description" content="KOBİ'ler için yapay zeka destekli pazarlama zekası platformu. Tüm reklam ve satış verilerini tek panelde birleştirin." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {font-family: Inter, system-ui, sans-serif; margin:0; background:linear-gradient(135deg,#0f172a,#1e293b); color:#fff; }
+    header {padding:24px 40px; display:flex; justify-content:space-between; align-items:center;}
+    .logo {font-size:20px; font-weight:700; letter-spacing:.5px; display:flex; align-items:center; gap:8px;}
+    .logo-icon {width:34px; height:34px; background:linear-gradient(135deg,#3b82f6,#6366f1); border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:600;}
+    nav a {color:#cbd5e1; text-decoration:none; margin-left:28px; font-size:14px; font-weight:500; transition:.2s;}
+    nav a:hover {color:#fff;}
+    .hero {max-width:980px; margin:70px auto 40px; text-align:center; padding:0 28px;}
+  .hero h1 {font-size:54px; line-height:1.05; margin:0 0 28px; background:linear-gradient(90deg,#60a5fa,#818cf8); -webkit-background-clip:text; background-clip:text; color:transparent;}
+    .hero p {font-size:20px; line-height:1.5; color:#cbd5e1; max-width:760px; margin:0 auto 40px;}
+    .actions {display:flex; justify-content:center; gap:18px; flex-wrap:wrap;}
+    .btn {border:0; cursor:pointer; font-weight:600; letter-spacing:.3px; padding:16px 34px; border-radius:14px; font-size:15px; transition:.25s;}
+    .btn-primary {background:#3b82f6; color:#fff; box-shadow:0 8px 24px -8px rgba(59,130,246,.5);} 
+    .btn-primary:hover {background:#2563eb;}
+    .btn-outline {background:rgba(255,255,255,.08); color:#e2e8f0;} .btn-outline:hover {background:rgba(255,255,255,.15);} 
+    .features {display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:26px; margin:80px auto 40px; max-width:1100px; padding:0 32px;}
+    .feature {background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); padding:28px 26px 32px; border-radius:18px; position:relative; overflow:hidden;}
+    .feature h3 {margin:0 0 12px; font-size:18px; font-weight:600;}
+    .feature p {margin:0; font-size:14px; line-height:1.5; color:#cbd5e1;}
+    footer {padding:60px 40px 30px; text-align:center; color:#64748b; font-size:13px;}
+    .tag {position:absolute; top:0; right:0; background:#3b82f6; color:#fff; padding:6px 12px; font-size:11px; font-weight:600; letter-spacing:.5px; border-bottom-left-radius:14px;}
+    @media (max-width:600px){ .hero h1{font-size:40px;} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo"><div class="logo-icon">IQ</div>IQsion</div>
+    <nav>
+      <a href="#ozellikler">Özellikler</a>
+      <a href="#fiyat">Fiyat</a>
+      <a href="#">Blog</a>
+      <a href="#">İletişim</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero">
+      <h1>Pazarlama Verinizi<br/>Yapay Zeka ile Güce Dönüştürün</h1>
+      <p>IQsion; Google Ads, Meta, TikTok ve Shopify verilerinizi tek panelde birleştirip gerçek zamanlı analiz eder, kârlılığı artırmak için eyleme dönüştürülebilir öneriler sunar.</p>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="window.location.href='https://app.iqsion.com/auth'">Platforma Giriş Yap</button>
+        <button class="btn btn-outline" onclick="window.location.href='https://app.iqsion.com/api/login'">14 Gün Ücretsiz Deneme</button>
+      </div>
+    </section>
+    <section id="ozellikler" class="features">
+      <div class="feature"><span class="tag">AI</span><h3>Akıllı Öneriler</h3><p>Harcamayı boşa çıkaran kampanyaları durdur, yüksek ROAS fırsatlarını anında değerlendir.</p></div>
+      <div class="feature"><h3>Otomatik Entegrasyon</h3><p>Kurulum < 5 dk; tüm önemli pazarlama ve satış kanallarını bağla, veri akmaya başlasın.</p></div>
+      <div class="feature"><h3>Gerçek Zamanlı Dashboard</h3><p>Anlık performans takibi, KPI uyarıları ve trend tahminleri tek ekranda.</p></div>
+      <div class="feature"><h3>Attribution & Karlılık</h3><p>Müşteri yolculuğunu ve kanal karlılığını net görüp bütçeyi optimize et.</p></div>
+    </section>
+  </main>
+  <footer>
+    © 2025 IQsion – Tüm hakları saklıdır. | <a href="https://app.iqsion.com" style="color:#94a3b8;text-decoration:none;">Uygulamaya Git</a>
+  </footer>
+</body>
+</html>

@@ -393,6 +393,34 @@ export default function Settings() {
     }
   };
 
+  const handleTestGoogleAdsConnection = async () => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/googleads/summary?userId=${encodeURIComponent(uid)}`);
+      const data = await res.json();
+      if (res.ok) {
+        const totals = (data?.totals || {}) as any;
+        const msg = `Hesap ${data?.accountId} • ${(totals.clicks||0)} tıklama • ${(totals.impressions||0)} gösterim • ${Number(totals.spend||0).toFixed(2)} ₺ harcama`;
+        toast({ title: 'Google Ads bağlandı', description: msg });
+      } else {
+        const details: string = data?.details || '';
+        if (/DEVELOPER_TOKEN_NOT_APPROVED/i.test(details)) {
+          toast({
+            title: 'Developer token onayı gerekli',
+            description: 'Bu token sadece test hesaplarına açık. Basic/Standard erişim başvurusu yapın veya test hesabı kullanın.',
+            variant: 'destructive',
+          });
+        } else if (/invalid_grant|UNAUTHENTICATED/i.test(details)) {
+          toast({ title: 'Oturum süresi dolmuş', description: 'Lütfen Google Ads bağlantısını yeniden yapın.', variant: 'destructive' });
+        } else {
+          toast({ title: 'Google Ads hatası', description: details || (data?.message || 'Bilinmeyen hata'), variant: 'destructive' });
+        }
+      }
+    } catch (e: any) {
+      toast({ title: 'Google Ads test hatası', description: e?.message || 'İşlenemedi', variant: 'destructive' });
+    }
+  };
+
   const handleSaveGoogleAnalyticsProperty = async (propertyId: string) => {
     try {
       const uid = (user as any)?.uid || (user as any)?.id;
@@ -428,29 +456,73 @@ export default function Settings() {
       enabled: !!connections?.search_console?.isConnected,
       queryFn: async () => {
         const res = await apiRequest('GET', `/api/searchconsole/sites?userId=${encodeURIComponent(uid)}`);
-        if (!res.ok) return { sites: [] };
+        if (!res.ok) {
+          return { sites: [], selectedSite: null, error: 'Fetch başarısız' };
+        }
         return await res.json();
       }
     });
-
     const sites = (data as any)?.sites || [];
     const selected = (data as any)?.selectedSite;
+    const rawSelectedPerm = sites.find((s: any) => s.url === selected)?.permissionLevel;
+    const isWeakPerm = rawSelectedPerm && !/owner|full/i.test(rawSelectedPerm);
+    const [queryLoading, setQueryLoading] = useState(false);
+    const [lastQueryRows, setLastQueryRows] = useState<any[]>([]);
+    const [lastQueryError, setLastQueryError] = useState<string | null>(null);
 
     const handleSelectSite = async (siteUrl: string) => {
       try {
         await apiRequest('POST', '/api/connections', { platform: 'search_console', siteUrl, userId: uid });
         queryClient.invalidateQueries({ queryKey: ['connections'] });
         refetch();
-      } catch (_) {}
+        toast({ title: 'Site seçildi', description: siteUrl });
+      } catch (e) {
+        toast({ title: 'Hata', description: 'Site seçimi kaydedilemedi', variant: 'destructive' });
+      }
+    };
+
+    const handleTestQuery = async () => {
+      setQueryLoading(true);
+      setLastQueryRows([]);
+      setLastQueryError(null);
+      try {
+        const body = {
+          siteUrl: selected,
+          dimensions: ['query'],
+          startDate: new Date(Date.now() - 14 * 86400000).toISOString().slice(0,10),
+          endDate: new Date(Date.now() - 1 * 86400000).toISOString().slice(0,10)
+        };
+        const res = await apiRequest('POST', `/api/searchconsole/query?userId=${encodeURIComponent(uid)}`, body);
+        const json = await res.json();
+        if (!res.ok) {
+          setLastQueryError(json?.error?.message || json?.message || 'Sorgu hatası');
+          toast({ title: 'Sorgu hatası', description: json?.error?.message || json?.message || 'Hata', variant: 'destructive' });
+        } else {
+          setLastQueryRows(json.rows || []);
+          toast({ title: 'Sorgu başarılı', description: `${(json.rows||[]).length} satır döndü` });
+        }
+      } catch (e: any) {
+        setLastQueryError(e?.message || 'İşlenemedi');
+        toast({ title: 'Hata', description: e?.message || 'İşlenemedi', variant: 'destructive' });
+      } finally {
+        setQueryLoading(false);
+      }
     };
 
     return (
       <div className="mt-2 space-y-2">
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs text-slate-400">Search Console Sites</label>
-          <Button size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => refetch()} disabled={isFetching}>
-            {(isFetching) ? '...' : 'Yenile'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => refetch()} disabled={isFetching}>
+              {(isFetching) ? '...' : 'Yenile'}
+            </Button>
+            {selected && (
+              <Button size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={handleTestQuery} disabled={queryLoading}>
+                {queryLoading ? 'Sorgu…' : 'Test sorgu'}
+              </Button>
+            )}
+          </div>
         </div>
         {sites.length === 0 && (
           <div className="text-xs text-slate-500">Site bulunamadı veya yetki yok</div>
@@ -462,10 +534,35 @@ export default function Settings() {
             </SelectTrigger>
             <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
               {sites.map((s: any) => (
-                <SelectItem key={s.url} value={s.url}>{s.url.replace(/^https?:\/\//,'')}</SelectItem>
+                <SelectItem key={s.url} value={s.url}>
+                  {s.url.replace(/^https?:\/\//,'')} {s.permissionLevel && (<span className="opacity-50">({s.permissionLevel.replace('site','')})</span>)}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
+        )}
+        {selected && isWeakPerm && (
+          <div className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/30 rounded p-2">
+            Seçili site için tam yetki yok. Sorgular sınırlı veya hatalı olabilir. Owner/Full yetki ekleyin.
+          </div>
+        )}
+        {lastQueryError && (
+          <div className="text-[11px] text-red-400 bg-red-400/10 border border-red-400/30 rounded p-2">
+            Sorgu Hatası: {lastQueryError}
+          </div>
+        )}
+        {!!lastQueryRows.length && (
+          <div className="text-[11px] space-y-1 max-h-40 overflow-auto bg-slate-800/40 p-2 rounded border border-slate-700">
+            {lastQueryRows.slice(0,10).map((r: any, idx: number) => (
+              <div key={idx} className="flex justify-between gap-2">
+                <span className="truncate max-w-[55%]" title={r.keys?.[0]}>{r.keys?.[0]}</span>
+                <span className="text-slate-400">{r.clicks} / {r.impressions} / {Math.round((r.ctr||0)*100)}%</span>
+              </div>
+            ))}
+            {lastQueryRows.length > 10 && (
+              <div className="text-center text-slate-500">+{lastQueryRows.length - 10} satır daha…</div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -888,6 +985,11 @@ export default function Settings() {
                                   </Badge>
                                   {platform.id === 'meta_ads' && (
                                     <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestMetaConnection}>
+                                      Bağlantıyı test et
+                                    </Button>
+                                  )}
+                                  {platform.id === 'google_ads' && (
+                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestGoogleAdsConnection}>
                                       Bağlantıyı test et
                                     </Button>
                                   )}
