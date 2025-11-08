@@ -23,6 +23,7 @@ const Opportunities = lazy(() => import("./pages/opportunities"));
 const Scenarios = lazy(() => import("./pages/scenarios"));
 const KpiAnalysis = lazy(() => import("./pages/kpi-analysis"));
 const TouchpointAnalysis = lazy(() => import("./pages/touchpoint-analysis"));
+const Health = lazy(() => import("./pages/health"));
 import Sidebar from "./components/layout/sidebar";
 import Header from "./components/layout/header";
 
@@ -76,6 +77,7 @@ function Router() {
               <Route path="/profitability" component={Profitability} />
               <Route path="/kpi-analysis" component={KpiAnalysis} />
               <Route path="/touchpoint-analysis" component={TouchpointAnalysis} />
+              <Route path="/health" component={Health} />
 
               <Route path="/collaborations/affiliate" component={Affiliate} />
               <Route path="/customers" component={Customers} />

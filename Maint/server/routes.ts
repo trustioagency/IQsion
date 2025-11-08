@@ -2073,6 +2073,371 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       return res.status(500).json({ message: 'Meta özet verisi çekilemedi', error: String(error) });
     }
   });
+
+  // Meta: Audiences summary (custom + lookalike counts)
+  router.get('/api/meta/audiences/summary', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snapshot = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
+      const metaData = snapshot.val();
+      const accessToken = metaData?.accessToken || process.env.META_ACCESS_TOKEN;
+      let adAccountId = metaData?.accountId || process.env.META_AD_ACCOUNT_ID || '';
+      if (!accessToken) return res.status(400).json({ message: 'Meta bağlantısı yok' });
+      if (!adAccountId) {
+        try {
+          const accResp = await fetchWithTimeout(`https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name&access_token=${accessToken}`, { method: 'GET' }, 10000);
+          const accJson: any = await accResp.json();
+          const first = accJson?.data?.[0];
+          if (first?.id) {
+            adAccountId = first.id;
+            await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({ accountId: first.id, accountName: first.name || null, updatedAt: new Date().toISOString() });
+          }
+        } catch {}
+      }
+      if (!adAccountId) return res.status(400).json({ message: 'Meta ad account ID yok' });
+
+      // Fetch custom audiences (including lookalike subtype)
+      const fields = encodeURIComponent('id,name,subtype,approximate_count,lookalike_spec');
+      const url = `https://graph.facebook.com/v19.0/${adAccountId}/customaudiences?fields=${fields}&limit=100&access_token=${accessToken}`;
+      const resp = await fetchWithTimeout(url, { method: 'GET' }, 20000);
+      const json: any = await resp.json();
+      if (!resp.ok || json.error) {
+        return res.status(resp.status || 500).json({ message: 'Audiences alınamadı', error: json.error || json });
+      }
+      const list = json.data || [];
+      let customCount = 0;
+      let lookalikeCount = 0;
+      for (const a of list) {
+        const subtype = String(a.subtype || '').toUpperCase();
+        if (subtype === 'LOOKALIKE') lookalikeCount++;
+        else customCount++;
+      }
+      return res.json({ customCount, lookalikeCount, total: list.length });
+    } catch (error) {
+      console.error('[Meta AUDIENCES SUMMARY ERROR]', error);
+      return res.status(500).json({ message: 'Meta audiences özet alınamadı', error: String(error) });
+    }
+  });
+
+  // Meta: Catalog status (best-effort)
+  router.get('/api/meta/catalog/status', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snapshot = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
+      const metaData = snapshot.val();
+      const accessToken = metaData?.accessToken || process.env.META_ACCESS_TOKEN;
+      let adAccountId = metaData?.accountId || process.env.META_AD_ACCOUNT_ID || '';
+      if (!accessToken) return res.status(400).json({ message: 'Meta bağlantısı yok' });
+      if (!adAccountId) {
+        try {
+          const accResp = await fetchWithTimeout(`https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name&access_token=${accessToken}`, { method: 'GET' }, 10000);
+          const accJson: any = await accResp.json();
+          const first = accJson?.data?.[0];
+          if (first?.id) {
+            adAccountId = first.id;
+            await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({ accountId: first.id, accountName: first.name || null, updatedAt: new Date().toISOString() });
+          }
+        } catch {}
+      }
+      if (!adAccountId) return res.status(400).json({ message: 'Meta ad account ID yok' });
+
+      // Try common edges to detect linked catalogs
+      const tryUrls = [
+        `https://graph.facebook.com/v19.0/${adAccountId}/owned_product_catalogs?fields=id,name&access_token=${accessToken}`,
+        `https://graph.facebook.com/v19.0/${adAccountId}/product_catalogs?fields=id,name&access_token=${accessToken}`
+      ];
+      let catalogs: any[] = [];
+      for (const u of tryUrls) {
+        try {
+          const r = await fetchWithTimeout(u, { method: 'GET' }, 10000);
+          const j: any = await r.json();
+          if (r.ok && !j.error && Array.isArray(j.data)) { catalogs = j.data; break; }
+        } catch {}
+      }
+      const hasCatalog = Array.isArray(catalogs) && catalogs.length > 0;
+      return res.json({ hasCatalog, count: catalogs.length || 0, names: catalogs.map((c: any) => c.name).filter(Boolean) });
+    } catch (error) {
+      console.error('[Meta CATALOG STATUS ERROR]', error);
+      return res.status(500).json({ message: 'Meta katalog durumu alınamadı', error: String(error) });
+    }
+  });
+
+  // Meta: Targeting summary (sample ad sets)
+  router.get('/api/meta/targeting/summary', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snapshot = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
+      const metaData = snapshot.val();
+      const accessToken = metaData?.accessToken || process.env.META_ACCESS_TOKEN;
+      let adAccountId = metaData?.accountId || process.env.META_AD_ACCOUNT_ID || '';
+      if (!accessToken) return res.status(400).json({ message: 'Meta bağlantısı yok' });
+      if (!adAccountId) {
+        try {
+          const accResp = await fetchWithTimeout(`https://graph.facebook.com/v19.0/me/adaccounts?fields=id,name&access_token=${accessToken}`, { method: 'GET' }, 10000);
+          const accJson: any = await accResp.json();
+          const first = accJson?.data?.[0];
+          if (first?.id) {
+            adAccountId = first.id;
+            await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({ accountId: first.id, accountName: first.name || null, updatedAt: new Date().toISOString() });
+          }
+        } catch {}
+      }
+      if (!adAccountId) return res.status(400).json({ message: 'Meta ad account ID yok' });
+
+      const fields = encodeURIComponent('id,name,targeting,configured_status,effective_status');
+      const url = `https://graph.facebook.com/v19.0/${adAccountId}/adsets?fields=${fields}&limit=50&access_token=${accessToken}`;
+      const resp = await fetchWithTimeout(url, { method: 'GET' }, 20000);
+      const json: any = await resp.json();
+      if (!resp.ok || json.error) {
+        return res.status(resp.status || 500).json({ message: 'Adset targeting alınamadı', error: json.error || json });
+      }
+      const list = json.data || [];
+      let hasGeo = false, hasAge = false, hasInterests = false;
+      for (const a of list) {
+        const t = a.targeting || {};
+        if (!hasGeo && t?.geo_locations && (t.geo_locations.countries?.length || t.geo_locations.locations?.length)) hasGeo = true;
+        if (!hasAge && (typeof t.age_min === 'number' || typeof t.age_max === 'number')) hasAge = true;
+        const flex = t?.flexible_spec || [];
+        const interests = t?.interests || [];
+        if (!hasInterests && ((Array.isArray(interests) && interests.length > 0) || flex.some((f: any) => Array.isArray(f.interests) && f.interests.length > 0))) hasInterests = true;
+        if (hasGeo && hasAge && hasInterests) break;
+      }
+      return res.json({ sampleCount: list.length, hasGeo, hasAge, hasInterests });
+    } catch (error) {
+      console.error('[Meta TARGETING SUMMARY ERROR]', error);
+      return res.status(500).json({ message: 'Meta targeting özeti alınamadı', error: String(error) });
+    }
+  });
+
+  // Meta: Health score history (append & read) - simple list of {timestamp, score, grade}
+  router.get('/api/meta/health/history', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snap = await admin.database().ref(`platformConnections/${userId}/meta_ads/healthHistory`).once('value');
+      const history = snap.val() || [];
+      return res.json({ history });
+    } catch (e) {
+      console.error('[Meta HEALTH HISTORY READ ERROR]', e);
+      return res.status(500).json({ message: 'Health geçmişi okunamadı', error: String(e) });
+    }
+  });
+
+  router.post('/api/meta/health/history', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const { score, grade } = req.body || {};
+      if (typeof score !== 'number' || !grade) {
+        return res.status(400).json({ message: 'Eksik skor/grade' });
+      }
+      const ref = admin.database().ref(`platformConnections/${userId}/meta_ads/healthHistory`);
+      const snap = await ref.once('value');
+      const existing = snap.val() || [];
+      const entry = { timestamp: new Date().toISOString(), score, grade };
+      const next = [...existing.slice(-199), entry]; // cap at 200
+      await ref.set(next);
+      return res.json({ ok: true, entry, total: next.length });
+    } catch (e) {
+      console.error('[Meta HEALTH HISTORY WRITE ERROR]', e);
+      return res.status(500).json({ message: 'Health geçmişi yazılamadı', error: String(e) });
+    }
+  });
+
+  /* ===================== GOOGLE SEARCH CONSOLE CONNECTION ===================== */
+  // Initiate OAuth for Search Console
+  router.get('/api/auth/searchconsole/connect', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const clientId = process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '';
+      // Normalize host to avoid 127.0.0.1 vs localhost mismatches in OAuth client settings
+      const rawHost = req.get('host') || 'localhost:5001';
+      const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+      const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/searchconsole/callback`;
+      const redirectUri = process.env.GOOGLE_SC_REDIRECT || computedRedirect;
+      const scope = encodeURIComponent('https://www.googleapis.com/auth/webmasters.readonly');
+      const state = encodeURIComponent(`${userId}:${Date.now()}`);
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&access_type=offline&prompt=consent&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`;
+      return res.json({ url: authUrl });
+    } catch (e) {
+      console.error('[SearchConsole CONNECT ERROR]', e);
+      return res.status(500).json({ message: 'Search Console bağlanma başlatılamadı', error: String(e) });
+    }
+  });
+
+  // OAuth callback for Search Console
+  router.get('/api/auth/searchconsole/callback', async (req, res) => {
+    try {
+      const code = req.query.code as string | undefined;
+      const stateRaw = req.query.state as string | undefined;
+      if (!code) return res.status(400).send('code eksik');
+      const userId = stateRaw?.split(':')[0] || 'test-user';
+      const clientId = process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '';
+      const clientSecret = process.env.GOOGLE_SC_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || '';
+      // Use the same host normalization as in the connect handler
+      const rawHost = req.get('host') || 'localhost:5001';
+      const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
+      const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/searchconsole/callback`;
+      const redirectUri = process.env.GOOGLE_SC_REDIRECT || computedRedirect;
+
+      const params = new URLSearchParams();
+      params.append('code', code);
+      params.append('client_id', clientId);
+      params.append('client_secret', clientSecret);
+      params.append('redirect_uri', redirectUri);
+      params.append('grant_type', 'authorization_code');
+      const tokenResp = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', body: params });
+      const tokenJson: any = await tokenResp.json();
+      if (!tokenResp.ok || tokenJson.error) {
+        console.error('[SearchConsole TOKEN ERROR]', tokenJson);
+        return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=search_console")</script>');
+      }
+      const accessToken = tokenJson.access_token;
+      const refreshToken = tokenJson.refresh_token;
+      const expiresIn = tokenJson.expires_in;
+
+      // Fetch sites list
+      const sitesResp = await fetch('https://www.googleapis.com/webmasters/v3/sites', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const sitesJson: any = await sitesResp.json();
+      const siteEntries = Array.isArray(sitesJson.siteEntry) ? sitesJson.siteEntry : [];
+      const sites = siteEntries.map((s: any) => ({ url: s.siteUrl, permissionLevel: s.permissionLevel }));
+
+      await admin.database().ref(`platformConnections/${userId}/search_console`).set({
+        platform: 'search_console',
+        accessToken,
+        refreshToken: refreshToken || null,
+        expiresIn,
+        createdAt: Date.now(),
+        sites,
+        selectedSite: sites[0]?.url || null,
+        isConnected: true,
+        updatedAt: new Date().toISOString()
+      });
+
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=success&platform=search_console")</script>');
+    } catch (e) {
+      console.error('[SearchConsole CALLBACK ERROR]', e);
+      return res.send('<script>window.location.replace("http://localhost:5173/settings?connection=error&platform=search_console")</script>');
+    }
+  });
+
+  // List Search Console sites (refresh if token near expiry)
+  router.get('/api/searchconsole/sites', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const snap = await admin.database().ref(`platformConnections/${userId}/search_console`).once('value');
+      const sc = snap.val();
+      if (!sc || !sc.accessToken) return res.status(404).json({ message: 'Search Console bağlı değil' });
+      let accessToken = sc.accessToken as string;
+      const refreshToken = sc.refreshToken as string | undefined;
+      if (refreshToken && sc.expiresIn && sc.createdAt) {
+        const ageMs = Date.now() - Number(sc.createdAt);
+        const ttlMs = (Number(sc.expiresIn) - 60) * 1000;
+        if (ageMs > ttlMs) {
+          const params = new URLSearchParams();
+          params.append('client_id', process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '');
+          params.append('client_secret', process.env.GOOGLE_SC_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || '');
+          params.append('refresh_token', refreshToken);
+          params.append('grant_type', 'refresh_token');
+          try {
+            const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', body: params });
+            const j: any = await r.json();
+            if (r.ok && j.access_token) {
+              accessToken = j.access_token;
+              await admin.database().ref(`platformConnections/${userId}/search_console`).update({
+                accessToken,
+                expiresIn: j.expires_in,
+                createdAt: Date.now(),
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              console.warn('[SearchConsole REFRESH] başarısız', j);
+            }
+          } catch (err) {
+            console.warn('[SearchConsole REFRESH] hata:', err);
+          }
+        }
+      }
+      if (sc.sites && Array.isArray(sc.sites) && sc.sites.length > 0) {
+        return res.json({ sites: sc.sites, selectedSite: sc.selectedSite || null });
+      }
+      // fallback live fetch
+      const sitesResp = await fetch('https://www.googleapis.com/webmasters/v3/sites', {
+        method: 'GET', headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const sitesJson: any = await sitesResp.json();
+      const siteEntries = Array.isArray(sitesJson.siteEntry) ? sitesJson.siteEntry : [];
+      const sites = siteEntries.map((s: any) => ({ url: s.siteUrl, permissionLevel: s.permissionLevel }));
+      await admin.database().ref(`platformConnections/${userId}/search_console/sites`).set(sites);
+      return res.json({ sites, selectedSite: sc.selectedSite || sites[0]?.url || null });
+    } catch (e) {
+      console.error('[SearchConsole SITES ERROR]', e);
+      return res.status(500).json({ message: 'Search Console siteleri alınamadı', error: String(e) });
+    }
+  });
+
+  // Basic Search Analytics query (top queries & pages)
+  router.post('/api/searchconsole/query', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const { siteUrl, startDate, endDate, dimensions } = req.body || {};
+      const snap = await admin.database().ref(`platformConnections/${userId}/search_console`).once('value');
+      const sc = snap.val();
+      if (!sc || !sc.accessToken) return res.status(404).json({ message: 'Search Console bağlı değil' });
+      const selSite = siteUrl || sc.selectedSite;
+      if (!selSite) return res.status(400).json({ message: 'siteUrl eksik' });
+      const sd = startDate || new Date(Date.now() - 14 * 86400000).toISOString().slice(0,10);
+      const ed = endDate || new Date(Date.now() - 1 * 86400000).toISOString().slice(0,10);
+      const dims = Array.isArray(dimensions) && dimensions.length > 0 ? dimensions : ['query'];
+      let accessToken = sc.accessToken as string;
+      const refreshToken = sc.refreshToken as string | undefined;
+      if (refreshToken && sc.expiresIn && sc.createdAt) {
+        const ageMs = Date.now() - Number(sc.createdAt);
+        const ttlMs = (Number(sc.expiresIn) - 60) * 1000;
+        if (ageMs > ttlMs) {
+          const params = new URLSearchParams();
+          params.append('client_id', process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '');
+          params.append('client_secret', process.env.GOOGLE_SC_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || '');
+          params.append('refresh_token', refreshToken);
+          params.append('grant_type', 'refresh_token');
+          try {
+            const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', body: params });
+            const j: any = await r.json();
+            if (r.ok && j.access_token) {
+              accessToken = j.access_token;
+              await admin.database().ref(`platformConnections/${userId}/search_console`).update({
+                accessToken,
+                expiresIn: j.expires_in,
+                createdAt: Date.now(),
+                updatedAt: new Date().toISOString()
+              });
+            }
+          } catch {}
+        }
+      }
+      const queryUrl = `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(selSite)}/searchAnalytics/query`;
+      const body = {
+        startDate: sd,
+        endDate: ed,
+        dimensions: dims,
+        rowLimit: 50
+      };
+      const qResp = await fetch(queryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body)
+      });
+      const qJson: any = await qResp.json();
+      if (!qResp.ok || qJson.error) {
+        return res.status(qResp.status || 500).json({ message: 'Search Analytics alınamadı', error: qJson.error || qJson });
+      }
+      return res.json({ rows: qJson.rows || [], requestedRange: { startDate: sd, endDate: ed }, dimensions: dims });
+    } catch (e) {
+      console.error('[SearchConsole QUERY ERROR]', e);
+      return res.status(500).json({ message: 'Search Console sorgu hatası', error: String(e) });
+    }
+  });
   // Meta Reklam OAuth connect endpoint
   router.get('/api/auth/meta/connect', async (req, res) => {
     const clientId = process.env.META_APP_ID;

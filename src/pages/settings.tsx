@@ -265,8 +265,18 @@ export default function Settings() {
           authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_search_console':
-          toast({ title: 'Bilgi', description: 'Search Console entegrasyonu yakında eklenecek.' });
-          return;
+          {
+            const urlRes = await apiRequest('GET', `/api/auth/searchconsole/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`);
+            const j = await urlRes.json().catch(() => ({}));
+            const url = j?.url as string | undefined;
+            if (url) {
+              window.location.href = url;
+              return;
+            } else {
+              toast({ title: 'Hata', description: 'Yönlendirme alınamadı', variant: 'destructive' });
+              return;
+            }
+          }
           break;
         default:
           toast({
@@ -408,6 +418,57 @@ export default function Settings() {
     } catch (e) {
       toast({ title: 'Hata', description: 'Property kaydedilemedi', variant: 'destructive' });
     }
+  };
+
+  // Search Console sites component
+  const SearchConsoleSites: React.FC<{ connections: any }> = ({ connections }) => {
+    const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+    const { data, refetch, isFetching } = useQuery({
+      queryKey: ['search-console-sites', uid],
+      enabled: !!connections?.search_console?.isConnected,
+      queryFn: async () => {
+        const res = await apiRequest('GET', `/api/searchconsole/sites?userId=${encodeURIComponent(uid)}`);
+        if (!res.ok) return { sites: [] };
+        return await res.json();
+      }
+    });
+
+    const sites = (data as any)?.sites || [];
+    const selected = (data as any)?.selectedSite;
+
+    const handleSelectSite = async (siteUrl: string) => {
+      try {
+        await apiRequest('POST', '/api/connections', { platform: 'search_console', siteUrl, userId: uid });
+        queryClient.invalidateQueries({ queryKey: ['connections'] });
+        refetch();
+      } catch (_) {}
+    };
+
+    return (
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs text-slate-400">Search Console Sites</label>
+          <Button size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => refetch()} disabled={isFetching}>
+            {(isFetching) ? '...' : 'Yenile'}
+          </Button>
+        </div>
+        {sites.length === 0 && (
+          <div className="text-xs text-slate-500">Site bulunamadı veya yetki yok</div>
+        )}
+        {sites.length > 0 && (
+          <Select value={selected || ''} onValueChange={handleSelectSite}>
+            <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+              <SelectValue placeholder="Site seç" />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+              {sites.map((s: any) => (
+                <SelectItem key={s.url} value={s.url}>{s.url.replace(/^https?:\/\//,'')}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+    );
   };
 
   if (authLoading || profileLoading) {
@@ -768,6 +829,10 @@ export default function Settings() {
                                       </SelectContent>
                                     </Select>
                                   </div>
+                                )}
+                                {/* Search Console site seçimi */}
+                                {platform.id === 'google_search_console' && isConnected && (
+                                  <SearchConsoleSites connections={connections as any} />
                                 )}
                                 {/* Shopify mağaza düzenleme */}
                                 {platform.id === 'shopify' && (

@@ -134,6 +134,14 @@ export const NAVIGATION_ITEMS = [
     icon: 'Settings',
     category: 'yapilandirma'
   }
+  ,
+  {
+    id: 'health',
+    labelKey: 'healthCenter',
+    href: '/health',
+    icon: 'Activity',
+    category: 'yapilandirma'
+  }
 ];
 
 export const PLATFORM_COLORS = {
