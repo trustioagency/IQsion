@@ -68,8 +68,9 @@ router.get('/api/auth/debug', (req, res) => {
       GOOGLE_ADS_REDIRECT_URI: process.env.GOOGLE_ADS_REDIRECT_URI || null,
       GOOGLE_SC_CLIENT_ID: process.env.GOOGLE_SC_CLIENT_ID || null,
       GOOGLE_SC_REDIRECT: process.env.GOOGLE_SC_REDIRECT || null,
-      META_APP_ID: process.env.META_APP_ID || null,
-      META_REDIRECT_URI: process.env.META_REDIRECT_URI || null,
+      // Meta değerlerini tamamen açığa çıkarmamak için maskele
+      META_APP_ID: mask(process.env.META_APP_ID),
+      META_REDIRECT_URI: mask(process.env.META_REDIRECT_URI),
       SHOPIFY_API_KEY: mask(process.env.SHOPIFY_API_KEY),
       SHOPIFY_REDIRECT_URI: process.env.SHOPIFY_REDIRECT_URI || null,
       TIKTOK_CLIENT_KEY: mask(process.env.TIKTOK_CLIENT_KEY),
@@ -2046,27 +2047,32 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         return res.status(400).json({ message: 'Meta access token veya ad account ID eksik.' });
       }
       // Dinamik parametreler: fields, date_preset veya time_range
-      // Varsayılan metrikler: spend, impressions, reach, clicks
-      const defaultFields = 'spend,impressions,reach,clicks,campaign_name';
-      const fields = req.query.fields || defaultFields;
-      // Tarih filtresi: date_preset (last_7d, last_30d) veya time_range (start/end)
-  // Varsayılan olarak son 7 gün
-  let datePreset = '';
-  let timeRange = '';
-  // Kesin tarih aralığı: son 7 gün
-  const today = new Date();
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(today.getDate() - 7);
-  const since = sevenDaysAgo.toISOString().slice(0, 10);
-  const until = today.toISOString().slice(0, 10);
-  timeRange = `&time_range={\"since\":\"${since}\",\"until\":\"${until}\"}`;
-  // Eğer query'den tarih gelirse onu kullan
-  if (req.query.start_date && req.query.end_date) {
-    timeRange = `&time_range={\"since\":\"${req.query.start_date}\",\"until\":\"${req.query.end_date}\"}`;
-  }
-  const filtering = '&filtering=[{"field":"campaign.delivery_info","operator":"IN","value":["active"]}]';
-  const url = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${fields}${timeRange}${filtering}&level=ad&access_token=${accessToken}`;
-      console.log('[MetaAds DEBUG] Facebook API URL:', url);
+      // Click metriğini seç: 'all' (clicks) veya 'link' (inline_link_clicks)
+      const clickMetric = String(req.query.clickMetric || 'all').toLowerCase();
+      // Varsayılan metrikler: spend, impressions, reach ve seçilen click metriği + kampanya adı
+      const baseFields = ['spend','impressions','reach','campaign_name'];
+      const clickFields = clickMetric === 'link' ? ['inline_link_clicks','inline_link_click_ctr'] : ['clicks','ctr'];
+      const defaultFields = [...baseFields, ...clickFields].join(',');
+      const fields = (req.query.fields as string) || defaultFields;
+      // Tarih filtresi: kesin aralık kullan. Varsayılan: son 7 gün, dünü bitiş al (partial-day farklarını önler)
+      let datePreset = '';
+      let timeRange = '';
+      const today = new Date();
+      const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+      const start = new Date(yesterday); start.setDate(yesterday.getDate() - 6);
+      const since = start.toISOString().slice(0, 10);
+      const until = yesterday.toISOString().slice(0, 10);
+      timeRange = `&time_range={\"since\":\"${since}\",\"until\":\"${until}\"}`;
+      // Eğer query'den tarih gelirse onu kullan
+      if (req.query.start_date && req.query.end_date) {
+        timeRange = `&time_range={\"since\":\"${req.query.start_date}\",\"until\":\"${req.query.end_date}\"}`;
+      }
+      // Teslimat filtresi: delivery=active ise sadece aktif kampanyaları filtrele, aksi halde filtreleme yapma
+      const delivery = String(req.query.delivery || '').toLowerCase();
+      const filtering = delivery === 'active' ? '&filtering=[{"field":"campaign.delivery_info","operator":"IN","value":["active"]}]' : '';
+      const level = (req.query.level as string) || 'ad';
+      const url = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${fields}${timeRange}${filtering}&level=${encodeURIComponent(level)}&access_token=${accessToken}`;
+          console.log('[MetaAds DEBUG] Facebook API URL:', url);
       const response = await fetch(url);
       const data = await response.json();
       if (data.error) {
@@ -2136,8 +2142,11 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const until = endDate || fmt(yesterday);
 
       // 1) Günlük kırılımla verileri çek (grafikler için)
-      // Ads Manager ile hizalanması için: clicks=inline_link_clicks, CTR=CTR(all)
-      const dayFields = ['spend','impressions','inline_link_clicks','ctr','inline_link_click_ctr'].join(',');
+      // Ads Manager uyumu: varsayılan clicks=clicks (all). İsteğe bağlı link tıklaması için clickMetric=link kullan.
+      const clickMetric = (typeof req.query.clickMetric === 'string' ? req.query.clickMetric : 'all').toLowerCase();
+      const dayFields = clickMetric === 'link'
+        ? ['spend','impressions','inline_link_clicks','ctr','inline_link_click_ctr'].join(',')
+        : ['spend','impressions','clicks','ctr'].join(',');
       const dailyUrl = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${dayFields}&level=account&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${accessToken}`;
       const dayResp = await fetchWithTimeout(dailyUrl, { method: 'GET' }, 20000);
       const dayJson = await dayResp.json();
@@ -2145,18 +2154,18 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         return res.status(dayResp.status || 500).json({ message: 'Meta günlük veriler alınamadı', error: dayJson.error || dayJson });
       }
 
-      const dayMap: Record<string, { spend: number; impressions: number; clicks: number; ctr: number; link_ctr: number; } > = {};
+      const dayMap: Record<string, { spend: number; impressions: number; clicks: number; ctr: number; link_ctr?: number; } > = {};
       for (const r of (dayJson.data || [])) {
         const d = r.date_start || '';
         if (!d) continue;
         dayMap[d] = {
           spend: Number(r.spend || 0),
           impressions: Number(r.impressions || 0),
-          // clicks: use link clicks to match CPC column in Ads Manager
-          clicks: Number(r.inline_link_clicks || 0),
-          // ctr: keep CTR(all) from API to avoid rounding mismatch
+          // clicks: seçilen click metriğine göre
+          clicks: clickMetric === 'link' ? Number(r.inline_link_clicks || 0) : Number(r.clicks || 0),
+          // ctr: CTR(all) kullan
           ctr: Number(r.ctr || 0),
-          link_ctr: Number(r.inline_link_click_ctr || 0),
+          ...(clickMetric === 'link' ? { link_ctr: Number(r.inline_link_click_ctr || 0) } : {}),
         };
       }
       // Zero-fill missing days for chart continuity
@@ -2171,23 +2180,26 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       }
 
       // 2) Toplamları tek satırda çek (Ads Manager toplamıyla daha uyumlu)
-      const totalFields = ['spend','impressions','inline_link_clicks','ctr'].join(',');
+      const totalFields = (clickMetric === 'link'
+        ? ['spend','impressions','inline_link_clicks','ctr']
+        : ['spend','impressions','clicks','ctr']
+      ).join(',');
       const totalUrl = `https://graph.facebook.com/v19.0/${adAccountId}/insights?fields=${totalFields}&level=account&time_range={"since":"${since}","until":"${until}"}&access_token=${accessToken}`;
       const totResp = await fetchWithTimeout(totalUrl, { method: 'GET' }, 20000);
       const totJson = await totResp.json();
       if (!totResp.ok || totJson.error) {
         return res.status(totResp.status || 500).json({ message: 'Meta toplam veriler alınamadı', error: totJson.error || totJson });
       }
-      const totalRow = (totJson.data || [])[0] || {};
-      const tSpend = Number(totalRow.spend || 0);
-      const tImpr = Number(totalRow.impressions || 0);
-      const tLinkClicks = Number(totalRow.inline_link_clicks || 0);
-      const tCtrAll = Number(totalRow.ctr || 0);
-      const tCpc = tLinkClicks > 0 ? tSpend / tLinkClicks : 0;
+  const totalRow = (totJson.data || [])[0] || {};
+  const tSpend = Number(totalRow.spend || 0);
+  const tImpr = Number(totalRow.impressions || 0);
+  const tClicks = clickMetric === 'link' ? Number(totalRow.inline_link_clicks || 0) : Number(totalRow.clicks || 0);
+  const tCtrAll = Number(totalRow.ctr || 0);
+  const tCpc = tClicks > 0 ? tSpend / tClicks : 0;
 
       return res.json({
         rows,
-        totals: { spend: tSpend, impressions: tImpr, clicks: tLinkClicks, ctr: tCtrAll, cpc: tCpc },
+        totals: { spend: tSpend, impressions: tImpr, clicks: tClicks, ctr: tCtrAll, cpc: tCpc, clickMetric },
         requestedRange: { startDate: since, endDate: until }
       });
     } catch (error) {
@@ -2583,6 +2595,17 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   // Meta Reklam OAuth connect endpoint
   router.get('/api/auth/meta/connect', async (req, res) => {
     const clientId = process.env.META_APP_ID;
+    const clientSecret = process.env.META_APP_SECRET;
+    if (!clientId || !clientSecret) {
+      return res.status(500).json({
+        message: 'Meta OAuth yapılandırılmamış. Eksik ortam değişkenleri.',
+        missing: {
+          META_APP_ID: !clientId,
+          META_APP_SECRET: !clientSecret,
+        },
+        hint: 'Maint/server/env veya .env.production dosyasında META_APP_ID ve META_APP_SECRET ekleyin, sonra yeniden başlatın.',
+      });
+    }
     const rawHost = req.get('host') || 'localhost:5001';
     const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
     const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/meta/callback`;

@@ -56,6 +56,7 @@ export default function Dashboard() {
   const { t, language } = useLanguage();
   const [showStartGuide, setShowStartGuide] = useState(false);
   const [dateRange, setDateRange] = useState<DateRangeKey>('30d');
+  const [includeToday, setIncludeToday] = useState<boolean>(false);
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<DateRangeKey>('30d');
   const [selectedChannel, setSelectedChannel] = useState<ChannelKey>('all');
@@ -117,7 +118,7 @@ export default function Dashboard() {
   const getCurrentRangeDates = (key: DateRangeKey) => {
     const today = new Date();
     const end = new Date(today);
-    end.setDate(today.getDate() - 1); // use yesterday as end
+    if (!includeToday) end.setDate(today.getDate() - 1); // default: use yesterday as end
     const start = new Date(end);
     const days = key === '7d' ? 7 : key === '30d' ? 30 : key === '90d' ? 90 : 30;
     start.setDate(end.getDate() - (days - 1));
@@ -178,11 +179,12 @@ export default function Dashboard() {
   }, [user, authLoading, toast, t]);
 
   const makeGaRange = (key: DateRangeKey) => {
+    const endKey = includeToday ? 'today' : 'yesterday';
     switch (key) {
-      case '7d': return { startDate: '7daysAgo', endDate: 'yesterday' };
-      case '30d': return { startDate: '30daysAgo', endDate: 'yesterday' };
-      case '90d': return { startDate: '90daysAgo', endDate: 'yesterday' };
-      default: return { startDate: '7daysAgo', endDate: 'yesterday' };
+      case '7d': return { startDate: '7daysAgo', endDate: endKey };
+      case '30d': return { startDate: '30daysAgo', endDate: endKey };
+      case '90d': return { startDate: '90daysAgo', endDate: endKey };
+      default: return { startDate: '7daysAgo', endDate: endKey };
     }
   };
 
@@ -382,7 +384,7 @@ export default function Dashboard() {
 
   const makeShopifyRange = (key: DateRangeKey) => {
     const today = new Date();
-    const end = new Date(today); end.setDate(today.getDate() - 1);
+    const end = new Date(today); if (!includeToday) end.setDate(today.getDate() - 1);
     const start = new Date(end);
     const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 29;
     start.setDate(end.getDate() - days);
