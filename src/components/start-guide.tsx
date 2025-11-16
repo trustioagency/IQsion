@@ -164,7 +164,18 @@ export default function StartGuide({ open, onOpenChange, userId }: { open: boole
         </div>
 
         <DialogFooter className="flex justify-between gap-2 mt-4">
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* Don't show again - persists locally */}
+            <Button
+              variant="ghost"
+              className="text-slate-400 hover:text-slate-200"
+              onClick={() => {
+                try { localStorage.setItem('iq_onboarding_hide', '1'); } catch {}
+                onOpenChange(false);
+              }}
+            >
+              {t('dontShowAgain')}
+            </Button>
             {step>1 && <Button variant="secondary" onClick={()=>setStep((s)=> (s-1) as any)}>{t('previous')}</Button>}
           </div>
           <div className="flex gap-2">

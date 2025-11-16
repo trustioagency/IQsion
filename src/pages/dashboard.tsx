@@ -85,6 +85,9 @@ export default function Dashboard() {
     try {
       const done = typeof window !== 'undefined' && window.localStorage.getItem('iq_onboarding_completed') === '1';
       if (done) return;
+      // Respect hide flag
+      const hide = typeof window !== 'undefined' && window.localStorage.getItem('iq_onboarding_hide') === '1';
+      if (hide) return;
     } catch {}
     const check = async () => {
       try {
@@ -92,11 +95,11 @@ export default function Dashboard() {
         if (user?.uid) url.searchParams.set('userId', user.uid);
         const res = await fetch(url.toString(), { credentials: 'include' });
         const j = await res.json();
+        // Only trigger if NO connections at all (strict requirement per request)
         const anyConnection = !!(j?.connections?.shopify || j?.connections?.google_analytics || j?.connections?.meta_ads || j?.connections?.google_ads);
-        const pixelSeen = !!j?.pixel?.lastSeenAt;
-        const hasProfile = !!j?.profile?.hasProfile;
-        const needsOnboarding = !(anyConnection && (pixelSeen || hasProfile));
-        if (needsOnboarding) setShowStartGuide(true);
+        if (!anyConnection) {
+          setShowStartGuide(true);
+        }
       } catch (e) {
         // ignore
       }

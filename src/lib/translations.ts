@@ -17,7 +17,13 @@ export const translations = {
     // Hero
     heroTitle: "E-ticaret İşletmeniz İçin",
     heroSubtitle: "AI Destekli Büyüme Ortağı",
-    heroDescription: "Shopify, Meta, Google ve TikTok verilerinizi tek platformda birleştirin. Pazarlama kararlarınızı AI ile otomatikleştirin ve karlılığınızı artırın.",
+    heroDescription: "Tüm pazarlama verilerinizi IQsion'da birleştirin. Pazarlama kararlarınızı yüzeysel raporlardan değil, kârlılığınıza odaklanan derin algoritmalardan alın, işlerinizi otomatize edin.",
+  watchDemo: "Demo Talep Et",
+  tryFree: "Ücretsiz Dene",
+  references: "Referanslar",
+  testimonials: "Müşteri Yorumları",
+  requestDemo: "Demo Talep Et",
+  integratedPlatforms: "Entegre Platformlar",
     
     // Navigation
     getStarted: "Başlayın",
@@ -139,6 +145,7 @@ export const translations = {
   onboardingIntro: "Bağlantılarınızı yapın, pikseli kurun ve şirket bilgilerinizi paylaşın.",
   stepConnectionsTitle: "Bağlantılar",
   stepConnectionsDesc: "Shopify ve pazarlama hesaplarınızı bağlayın.",
+  dontShowAgain: "Bir daha gösterme",
   stepPixelTitle: "Takip Pikseli",
   stepPixelDesc: "Aşağıdaki snippet'i sitenize ekleyin ve doğrulayın.",
   generatePixel: "Piksel Oluştur",
@@ -249,6 +256,12 @@ export const translations = {
     heroTitle: "For Your E-commerce Business",
     heroSubtitle: "AI-Powered Growth Partner",
     heroDescription: "Unify your Shopify, Meta, Google and TikTok data in one platform. Automate your marketing decisions with AI and boost your profitability.",
+  watchDemo: "Request Demo",
+  tryFree: "Try Free",
+  references: "References",
+  testimonials: "Testimonials",
+  requestDemo: "Request Demo",
+  integratedPlatforms: "Integrated Platforms",
     
     // Navigation
     getStarted: "Get Started",
@@ -373,6 +386,7 @@ export const translations = {
   onboardingIntro: "Connect accounts, install the pixel, and share company basics.",
   stepConnectionsTitle: "Connections",
   stepConnectionsDesc: "Connect your Shopify and marketing accounts.",
+  dontShowAgain: "Don't show again",
   stepPixelTitle: "Tracking Pixel",
   stepPixelDesc: "Add the snippet below to your site and verify.",
   generatePixel: "Generate Pixel",

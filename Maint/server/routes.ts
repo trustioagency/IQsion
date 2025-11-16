@@ -2738,24 +2738,29 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
       const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/tiktok/callback`;
       const redirectEnv = process.env.TIKTOK_REDIRECT_URI;
-      const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+      // Eğer prod ortamı ise env’deki URI’yı kullan, değilse dinamik oluştur.
+      const redirectUri = redirectEnv || computedRedirect;
       const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
       const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+      // TikTok OAuth 2.0 parametreleri – 404 sebebi yanlış base domain ve eksik response_type
       const scope = [
         'ads.read',
         'ads.management',
         'report.data',
         'ad.account.read'
       ].join(',');
+      // Doğru yetkilendirme endpointi: https://ads.tiktok.com/marketing_api/auth
+      // Gerekli query: app_id (client_key), state, scope, redirect_uri (urlencode), response_type=code
       const authUrl =
-        `https://business-api.tiktok.com/open_api/v1.3/oauth2/authorize?` +
-        `client_key=${encodeURIComponent(clientKey)}` +
+        `https://ads.tiktok.com/marketing_api/auth?` +
+        `app_id=${encodeURIComponent(clientKey)}` +
+        `&state=${encodeURIComponent(stateRaw)}` +
         `&scope=${encodeURIComponent(scope)}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&state=${encodeURIComponent(stateRaw)}`;
+        `&response_type=code`;
       return res.redirect(authUrl);
     } catch (e) {
-      return res.status(500).send('TikTok connect hatası: ' + (e as any)?.message || String(e));
+      return res.status(500).send('TikTok connect hatası: ' + ((e as any)?.message || String(e)));
     }
   });
 
