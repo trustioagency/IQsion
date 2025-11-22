@@ -6,6 +6,7 @@ import fs from "fs";
 import admin from "./firebase";
 import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
+import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
 // Basit fetch timeout helper
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -21,15 +22,20 @@ const router = express.Router();
 
 // Helper: settings redirect (avoids hard-coded localhost in production)
 function buildAppBase(req: express.Request) {
-  // Prefer explicit APP_URL env (e.g., https://app.iqsion.com)
-  let appUrl = (process.env.APP_URL || '').trim().replace(/\/$/, '');
-  if (!appUrl) {
-    // Derive from host header; force https for non-localhost
-    const host = (req.get('host') || '').replace('127.0.0.1', 'localhost');
-    const isLocal = /localhost|127\.0\.0\.1/.test(host);
-    appUrl = (isLocal ? (req.protocol + '://' + host.replace(/:\d+$/, ':5173')) : ('https://' + host.replace(/:.*$/, '')));
+  // 1) Prefer explicit APP_URL (e.g., https://app.iqsion.com)
+  const envApp = (process.env.APP_URL || '').trim().replace(/\/$/,'');
+  if (envApp) return envApp;
+  // 2) Prefer forwarded headers when behind proxy (trust proxy enabled)
+  const xfProto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+  const xfHost = (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
+  const host = xfHost.replace('127.0.0.1', 'localhost');
+  const isLocal = /localhost|127\.0\.0\.1/.test(host);
+  if (isLocal) {
+    // In dev, keep Vite’s port for SPA
+    return `${req.protocol}://${host.replace(/:\d+$/, ':5173')}`;
   }
-  return appUrl;
+  // In prod, force https and strip any port
+  return `${xfProto || 'https'}://${host.replace(/:.*/, '')}`;
 }
 function settingsRedirect(res: express.Response, req: express.Request, platform: string, ok: boolean) {
   const base = buildAppBase(req);
@@ -42,8 +48,9 @@ function settingsRedirect(res: express.Response, req: express.Request, platform:
 // Helps diagnose "client_id=undefined" veya yanlış redirect sorunları lokal & prod.
 router.get('/api/auth/debug', (req, res) => {
   const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1','localhost');
-  const proto = req.protocol || 'http';
-  const base = `${proto}://${host}`;
+  const xfHost = (req.headers['x-forwarded-host'] as string) || null;
+  const xfProto = (req.headers['x-forwarded-proto'] as string) || null;
+  const base = buildAppBase(req);
   const mask = (v?: string) => {
     if (!v) return null;
     const raw = v.trim().replace(/^"|"$/g,'');
@@ -52,6 +59,7 @@ router.get('/api/auth/debug', (req, res) => {
   };
   const data = {
     host,
+    forwarded: { host: xfHost, proto: xfProto },
     base,
     computed: {
       googleAnalyticsRedirect: `${base}/api/auth/google/callback`,
@@ -62,21 +70,21 @@ router.get('/api/auth/debug', (req, res) => {
       tiktokRedirect: `${base}/api/auth/tiktok/callback`,
     },
     env: {
-      GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || null,
-      GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || null,
-      GOOGLE_ADS_CLIENT_ID: process.env.GOOGLE_ADS_CLIENT_ID || null,
-      GOOGLE_ADS_REDIRECT_URI: process.env.GOOGLE_ADS_REDIRECT_URI || null,
-      GOOGLE_SC_CLIENT_ID: process.env.GOOGLE_SC_CLIENT_ID || null,
-      GOOGLE_SC_REDIRECT: process.env.GOOGLE_SC_REDIRECT || null,
+      GOOGLE_CLIENT_ID: (process.env.GOOGLE_CLIENT_ID || '').trim() || null,
+      GOOGLE_REDIRECT_URI: (process.env.GOOGLE_REDIRECT_URI || '').trim() || null,
+      GOOGLE_ADS_CLIENT_ID: (process.env.GOOGLE_ADS_CLIENT_ID || '').trim() || null,
+      GOOGLE_ADS_REDIRECT_URI: (process.env.GOOGLE_ADS_REDIRECT_URI || '').trim() || null,
+      GOOGLE_SC_CLIENT_ID: (process.env.GOOGLE_SC_CLIENT_ID || '').trim() || null,
+      GOOGLE_SC_REDIRECT: (process.env.GOOGLE_SC_REDIRECT || '').trim() || null,
       // Meta değerlerini tamamen açığa çıkarmamak için maskele
       META_APP_ID: mask(process.env.META_APP_ID),
       META_REDIRECT_URI: mask(process.env.META_REDIRECT_URI),
       SHOPIFY_API_KEY: mask(process.env.SHOPIFY_API_KEY),
-      SHOPIFY_REDIRECT_URI: process.env.SHOPIFY_REDIRECT_URI || null,
+      SHOPIFY_REDIRECT_URI: (process.env.SHOPIFY_REDIRECT_URI || '').trim() || null,
       TIKTOK_CLIENT_KEY: mask(process.env.TIKTOK_CLIENT_KEY),
-      TIKTOK_REDIRECT_URI: process.env.TIKTOK_REDIRECT_URI || null,
-      CORS_ORIGINS: process.env.CORS_ORIGINS || null,
-      APP_URL: process.env.APP_URL || null,
+      TIKTOK_REDIRECT_URI: (process.env.TIKTOK_REDIRECT_URI || '').trim() || null,
+      CORS_ORIGINS: (process.env.CORS_ORIGINS || '').trim() || null,
+      APP_URL: (process.env.APP_URL || '').trim() || null,
       NODE_ENV: process.env.NODE_ENV || null,
     },
     notes: [
@@ -816,9 +824,9 @@ router.get('/api/auth/shopify/connect', (req, res) => {
   // Normalize host and compute redirect dynamically to avoid port mismatches in local (e.g., 5000 vs 5001)
   const rawHost = req.get('host') || 'localhost:5001';
   const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
-  const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/shopify/callback`;
-  const redirectEnv = process.env.SHOPIFY_REDIRECT_URI || '';
-  const redirectUri = /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv) ? computedRedirect : (redirectEnv || computedRedirect);
+  const computedRedirect = `${buildAppBase(req)}/api/auth/shopify/callback`;
+  const redirectEnv = (process.env.SHOPIFY_REDIRECT_URI || '').trim();
+  const redirectUri = /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv) ? computedRedirect : ((redirectEnv || computedRedirect)).trim();
   // Normalize storeUrl: allow 'mystore' or 'mystore.myshopify.com', strip protocol
   storeUrl = (storeUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   if (!/\.myshopify\.com$/i.test(storeUrl)) {
@@ -833,7 +841,8 @@ router.get('/api/auth/shopify/connect', (req, res) => {
     usingRedirect: redirectUri,
     userId,
   });
-  const authUrl = `https://${storeUrl}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(userId)}`;
+  const shopifyKey = (process.env.SHOPIFY_API_KEY || '').trim();
+  const authUrl = `https://${storeUrl}/admin/oauth/authorize?client_id=${shopifyKey}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(userId)}`;
   res.redirect(authUrl);
 });
 
@@ -844,8 +853,8 @@ router.get('/api/auth/shopify/callback', async (req, res) => {
   try {
     // Access token al
     const tokenRes = await axios.post(`https://${shop}/admin/oauth/access_token`, {
-      client_id: process.env.SHOPIFY_API_KEY,
-      client_secret: process.env.SHOPIFY_API_SECRET,
+      client_id: (process.env.SHOPIFY_API_KEY || '').trim(),
+      client_secret: (process.env.SHOPIFY_API_SECRET || '').trim(),
       code,
     });
     const accessToken = tokenRes.data.access_token;
@@ -1246,6 +1255,69 @@ router.get('/api/shopify/summary', async (req, res) => {
   }
 });
 
+// Shopify summary from BigQuery (metrics_daily)
+router.get('/api/shopify/summary-bq', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const revenueMode = (typeof req.query.revenueMode === 'string' ? req.query.revenueMode : 'gross') as 'paid' | 'gross';
+    // Default range: last 30 days ending yesterday
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+    const bq = getBigQuery();
+    const dataset = process.env.BQ_DATASET || 'iqsion';
+    const sql = `
+      SELECT date,
+             SUM(CAST(transactions AS INT64)) AS orders,
+             SUM(CAST(revenueMicros AS INT64)) AS revenueMicros
+      FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+      WHERE userId = @userId AND source = 'shopify' AND date BETWEEN @start AND @end
+      GROUP BY date
+      ORDER BY date
+    `;
+    const [job] = await bq.createQueryJob({
+      query: sql,
+      params: { userId, start: since, end: until },
+      location: process.env.BQ_LOCATION || 'US',
+    });
+    const [rows] = await job.getQueryResults();
+
+    const map: Record<string, { orders: number; revenue: number }> = {};
+    for (const r of rows as any[]) {
+      const d = String(r.date);
+      const orders = Number(r.orders || 0);
+      const revenue = Number(r.revenueMicros || 0) / 1_000_000;
+      map[d] = { orders, revenue };
+    }
+
+    const series: Array<{ date: string; orders: number; revenue: number }> = [];
+    const cur = new Date(since);
+    const end = new Date(until);
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0,10);
+      const v = map[key] || { orders: 0, revenue: 0 };
+      series.push({ date: key, orders: v.orders, revenue: Number(v.revenue.toFixed(2)) });
+      cur.setDate(cur.getDate()+1);
+    }
+
+    const totals = series.reduce((acc, d) => { acc.orders += d.orders; acc.revenue += d.revenue; return acc; }, { orders: 0, revenue: 0 });
+    const aov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
+
+    return res.json({
+      rows: series,
+      totals: { ...totals, aov: Number(aov.toFixed(2)), currency: 'TRY', revenueMode },
+      requestedRange: { startDate: since, endDate: until }
+    });
+  } catch (error) {
+    console.error('[Shopify SUMMARY BQ ERROR]', error);
+    return res.status(500).json({ message: 'Shopify BQ özet verisi çekilemedi', error: String(error) });
+  }
+});
+
 // Profitability summary: revenue, COGS, gross/net profit, margin, ROAS (best-effort)
 router.get('/api/profitability/summary', async (req, res) => {
   try {
@@ -1478,33 +1550,55 @@ router.get('/api/googleads/accounts', async (req, res) => {
       developer_token: developerToken,
     });
 
-    // Proactive token refresh if expired (access token lifetime ~1h). We refresh if > (expiresIn-60s)
+    // Proactive token refresh if expired (access token lifetime ~1h). Try multiple client pairs if needed.
     try {
       if (refreshToken && googleAdsConn.expiresIn && googleAdsConn.createdAt) {
         const ageMs = Date.now() - Number(googleAdsConn.createdAt);
         const ttlMs = (Number(googleAdsConn.expiresIn) - 60) * 1000; // refresh 60s early
         if (ageMs > ttlMs) {
-          const params = new URLSearchParams();
-          params.append('client_id', process.env.GOOGLE_ADS_CLIENT_ID || '');
-          params.append('client_secret', process.env.GOOGLE_ADS_CLIENT_SECRET || '');
-          params.append('refresh_token', refreshToken);
-          params.append('grant_type', 'refresh_token');
-          const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params.toString(),
-          });
-          const tokenJson = await tokenResp.json();
-          if (tokenResp.ok && tokenJson.access_token) {
+          const tryPairs: Array<{ id: string; secret: string } > = [];
+          const storedId = String(googleAdsConn.oauthClientId || '').trim();
+          const storedSecret = String(googleAdsConn.oauthClientSecret || '').trim();
+          if (storedId && storedSecret) tryPairs.push({ id: storedId, secret: storedSecret });
+          const adsId = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
+          const adsSecret = (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim();
+          if (adsId && adsSecret) tryPairs.push({ id: adsId, secret: adsSecret });
+          const genId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+          const genSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+          if (genId && genSecret) tryPairs.push({ id: genId, secret: genSecret });
+
+          let refreshed: any = null;
+          for (const pair of tryPairs) {
+            try {
+              const params = new URLSearchParams();
+              params.append('client_id', pair.id);
+              params.append('client_secret', pair.secret);
+              params.append('refresh_token', refreshToken);
+              params.append('grant_type', 'refresh_token');
+              const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString(),
+              });
+              const tokenJson = await tokenResp.json();
+              if (tokenResp.ok && tokenJson.access_token) {
+                refreshed = { token: tokenJson, pair };
+                break;
+              }
+            } catch (_) {}
+          }
+          if (refreshed) {
             await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
-              accessToken: tokenJson.access_token,
-              expiresIn: tokenJson.expires_in,
+              accessToken: refreshed.token.access_token,
+              expiresIn: refreshed.token.expires_in,
               updatedAt: new Date().toISOString(),
               createdAt: Date.now(),
+              oauthClientId: refreshed.pair.id,
+              oauthClientSecret: refreshed.pair.secret ? 'set' : undefined,
             });
             console.log('[GoogleAds REFRESH] access token yenilendi (accounts endpoint).');
           } else {
-            console.warn('[GoogleAds REFRESH] refresh başarısız:', tokenJson);
+            console.warn('[GoogleAds REFRESH] refresh başarısız: tüm client_id denemeleri başarısız');
           }
         }
       }
@@ -1565,8 +1659,16 @@ router.get('/api/googleads/accounts', async (req, res) => {
       console.warn('[GoogleAds REST] listAccessibleCustomers failed:', e);
     }
 
-    // If nothing accessible, return empty array (UI will allow manual entry)
-    if (!resourceNames.length) return res.json({ accounts: [] });
+    // If nothing accessible, record diagnostic and return empty array (UI allows manual entry)
+    if (!resourceNames.length) {
+      try {
+        await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+          lastError: 'no_accessible_customers',
+          lastErrorAt: new Date().toISOString(),
+        });
+      } catch(_) {}
+      return res.json({ accounts: [] });
+    }
 
     // Enrich with names via GAQL (best-effort)
     const ids = resourceNames.map((n) => String(n).split('/')[1]).filter(Boolean);
@@ -1592,6 +1694,16 @@ router.get('/api/googleads/accounts', async (req, res) => {
     res.json({ accounts });
   } catch (err) {
     console.error('[GoogleAds DEBUG] /api/googleads/accounts error:', err);
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const msg = (err instanceof Error ? err.message : String(err)) || 'unknown';
+      const tag = /invalid_client/i.test(msg) ? 'invalid_client' : 'accounts_error';
+      await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+        lastError: tag,
+        lastErrorMessage: msg.slice(0,400),
+        lastErrorAt: new Date().toISOString(),
+      });
+    } catch(_) {}
     res.status(500).json({ message: 'Google Ads hesapları alınamadı', error: String(err) });
   }
 });
@@ -1672,32 +1784,54 @@ router.get('/api/googleads/summary', async (req, res) => {
     const until = endDate || fmt(yesterday);
 
     // GAQL ile günlük metrikleri çek (hesap seviyesi)
-    // Proactive refresh before GAQL if needed
+    // Proactive refresh before GAQL if needed (try stored and both client pairs)
     try {
       if (gaConn?.refreshToken && gaConn?.expiresIn && gaConn?.createdAt) {
         const ageMs = Date.now() - Number(gaConn.createdAt);
         const ttlMs = (Number(gaConn.expiresIn) - 60) * 1000;
         if (ageMs > ttlMs) {
-          const params = new URLSearchParams();
-          params.append('client_id', process.env.GOOGLE_ADS_CLIENT_ID || '');
-          params.append('client_secret', process.env.GOOGLE_ADS_CLIENT_SECRET || '');
-          params.append('refresh_token', gaConn.refreshToken);
-          params.append('grant_type', 'refresh_token');
-          const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString()
-          });
-          const tokenJson = await tokenResp.json();
-          if (tokenResp.ok && tokenJson.access_token) {
+          const tryPairs: Array<{ id: string; secret: string } > = [];
+          const storedId = String(gaConn.oauthClientId || '').trim();
+          const storedSecret = String(gaConn.oauthClientSecret || '').trim();
+          if (storedId && storedSecret) tryPairs.push({ id: storedId, secret: storedSecret });
+          const adsId = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
+          const adsSecret = (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim();
+          if (adsId && adsSecret) tryPairs.push({ id: adsId, secret: adsSecret });
+          const genId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+          const genSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+          if (genId && genSecret) tryPairs.push({ id: genId, secret: genSecret });
+
+          let refreshed: any = null;
+          for (const pair of tryPairs) {
+            try {
+              const params = new URLSearchParams();
+              params.append('client_id', pair.id);
+              params.append('client_secret', pair.secret);
+              params.append('refresh_token', gaConn.refreshToken);
+              params.append('grant_type', 'refresh_token');
+              const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString()
+              });
+              const tokenJson = await tokenResp.json();
+              if (tokenResp.ok && tokenJson.access_token) {
+                refreshed = { token: tokenJson, pair };
+                break;
+              }
+            } catch (_) {}
+          }
+          if (refreshed) {
             await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
-              accessToken: tokenJson.access_token,
-              expiresIn: tokenJson.expires_in,
+              accessToken: refreshed.token.access_token,
+              expiresIn: refreshed.token.expires_in,
               updatedAt: new Date().toISOString(),
               createdAt: Date.now(),
+              oauthClientId: refreshed.pair.id,
+              oauthClientSecret: refreshed.pair.secret ? 'set' : undefined,
             });
-            gaConn.accessToken = tokenJson.access_token;
+            gaConn.accessToken = refreshed.token.access_token;
             console.log('[GoogleAds REFRESH] access token yenilendi (summary endpoint).');
           } else {
-            console.warn('[GoogleAds REFRESH] refresh başarısız:', tokenJson);
+            console.warn('[GoogleAds REFRESH] refresh başarısız: tüm client_id denemeleri başarısız');
           }
         }
       }
@@ -1748,6 +1882,16 @@ router.get('/api/googleads/summary', async (req, res) => {
           details: 'invalid_grant',
         });
       }
+      // Capture invalid_client separately
+      if (/invalid_client/i.test(msg)) {
+        try {
+          await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+            lastError: 'invalid_client',
+            lastErrorMessage: msg.slice(0,400),
+            lastErrorAt: new Date().toISOString(),
+          });
+        } catch(_) {}
+      }
       return res.status(502).json({ message: 'Google Ads sorgusu başarısız', details: msg, gaql });
     }
 
@@ -1785,19 +1929,100 @@ router.get('/api/googleads/summary', async (req, res) => {
   }
 });
 
+// Google Ads summary from BigQuery (metrics_daily)
+router.get('/api/googleads/summary-bq', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    // Attempt to include accountId from stored connection for parity
+    let accountId: string | undefined = undefined;
+    try {
+      const snap = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
+      accountId = snap.val()?.accountId || undefined;
+    } catch (_) {}
+    // Default range: last 7 days ending yesterday
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+    const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+    const bq = getBigQuery();
+    const dataset = process.env.BQ_DATASET || 'iqsion';
+    const sql = `
+      SELECT date,
+             SUM(CAST(impressions AS INT64)) AS impressions,
+             SUM(CAST(clicks AS INT64)) AS clicks,
+             SUM(CAST(costMicros AS INT64)) AS costMicros,
+             SUM(CAST(transactions AS INT64)) AS conversions
+      FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+      WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN @start AND @end
+      GROUP BY date
+      ORDER BY date
+    `;
+    const [job] = await bq.createQueryJob({
+      query: sql,
+      params: { userId, start: since, end: until },
+      location: process.env.BQ_LOCATION || 'US',
+    });
+    const [rows] = await job.getQueryResults();
+
+    const map: Record<string, { impressions: number; clicks: number; spend: number; conversions: number; }> = {};
+    for (const r of rows as any[]) {
+      const d = String(r.date);
+      map[d] = {
+        impressions: Number(r.impressions || 0),
+        clicks: Number(r.clicks || 0),
+        spend: Number(r.costMicros || 0) / 1_000_000,
+        conversions: Number(r.conversions || 0),
+      };
+    }
+
+    const series: Array<{ date: string; impressions: number; clicks: number; spend: number; conversions: number }> = [];
+    const cur = new Date(since);
+    const end = new Date(until);
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0,10);
+      const v = map[key] || { impressions: 0, clicks: 0, spend: 0, conversions: 0 };
+      series.push({ date: key, impressions: v.impressions, clicks: v.clicks, spend: v.spend, conversions: v.conversions });
+      cur.setDate(cur.getDate()+1);
+    }
+
+    const totals = series.reduce((acc, d) => {
+      acc.impressions += d.impressions;
+      acc.clicks += d.clicks;
+      acc.spend += d.spend;
+      acc.conversions += d.conversions;
+      return acc;
+    }, { impressions: 0, clicks: 0, spend: 0, conversions: 0 });
+    const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+    const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+
+    return res.json({
+      // maintain existing shape
+      accountId,
+      requestedRange: { since, until },
+      rows: series,
+      totals: { ...totals, ctr, cpc },
+    });
+  } catch (error) {
+    console.error('[GoogleAds SUMMARY BQ ERROR]', error);
+    return res.status(500).json({ message: 'Google Ads BQ özet verisi çekilemedi', error: String(error) });
+  }
+});
+
 // Google Ads OAuth bağlantı endpointi
 router.get('/api/auth/googleads/connect', async (req: express.Request, res: express.Response) => {
   // Be tolerant: fall back to generic GOOGLE_CLIENT_ID if Ads-specific var missing
-  const clientId = process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) {
-    return res.status(500).json({ message: 'GOOGLE_ADS_CLIENT_ID not set (and no GOOGLE_CLIENT_ID fallback). Use Cloud Run env or .env.production.' });
-  }
+  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim();
+    if (!clientId) {
+      // Redirect to settings with error instead of raw JSON for better UX
+      return settingsRedirect(res, req, 'google_ads', false);
+    }
   // Normalize host and compute redirect dynamically to avoid port mismatches (e.g., 5000 vs 5001)
-  const rawHost = req.get('host') || 'localhost:5001';
-  const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
-  const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/googleads/callback`;
-  const redirectEnv = process.env.GOOGLE_ADS_REDIRECT_URI;
-  const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+  const redirectEnv = (process.env.GOOGLE_ADS_REDIRECT_URI || '').trim();
+  const computedRedirect = `${buildAppBase(req)}/api/auth/googleads/callback`;
+  const redirectUri = (redirectEnv || computedRedirect).trim();
   const scope = 'https://www.googleapis.com/auth/adwords';
   const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
   const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
@@ -1814,14 +2039,12 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   if (!code) return res.status(400).send('Google OAuth kodu eksik.');
   try {
   // Mirror fallback logic from connect
-  const clientId = process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.GOOGLE_ADS_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '').trim();
     // Use same normalization logic as in connect
-    const rawHost = req.get('host') || 'localhost:5001';
-    const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
-    const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/googleads/callback`;
-    const redirectEnv = process.env.GOOGLE_ADS_REDIRECT_URI;
-    const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+    const redirectEnv = (process.env.GOOGLE_ADS_REDIRECT_URI || '').trim();
+    const computedRedirect = `${buildAppBase(req)}/api/auth/googleads/callback`;
+    const redirectUri = (redirectEnv || computedRedirect).trim();
     // Token alma
     const params = new URLSearchParams();
     params.append('code', code);
@@ -1851,7 +2074,36 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   expiresIn: tokenData.expires_in,
   createdAt: Date.now(),
   isConnected: true,
+  oauthClientId: clientId,
+  oauthClientSecret: clientSecret ? 'set' : undefined,
     });
+    // Best-effort: auto-detect first accessible account and save
+    try {
+      const devToken = (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
+      if (devToken) {
+        const listUrl = `https://googleads.googleapis.com/v17/customers:listAccessibleCustomers`;
+        const r = await fetch(listUrl, { method: 'GET', headers: { Authorization: `Bearer ${tokenData.access_token}`, 'developer-token': devToken } });
+        if (r.ok) {
+          const j: any = await r.json();
+          const first = (j.resourceNames || [])[0];
+          const id = first ? String(first).split('/')[1] : undefined;
+          if (id) {
+            await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(id);
+          }
+        }
+      }
+    } catch (_) {}
+    try {
+      const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+      if (adminKey) {
+        const today = new Date();
+        const endD = new Date(today); endD.setDate(today.getDate() - 1);
+        const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+        fetchWithTimeout(`${buildAppBase(req)}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+      }
+    } catch {}
   return settingsRedirect(res, req, 'google_ads', true);
   } catch (err) {
     res.status(500).send('Google Ads token alma hatası: ' + err);
@@ -1866,6 +2118,140 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     return res.json({ message: 'Google Ads bağlantısı silindi.' });
   } catch (e) {
     return res.status(500).json({ message: 'Google Ads bağlantısı silinemedi', error: String(e) });
+  }
+});
+
+// Google Ads debug: surface connection and env presence (masked)
+router.get('/api/googleads/debug', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const snap = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
+    const c = snap.val() || {};
+    const mask = (v?: string) => {
+      if (!v) return null;
+      const s = String(v);
+      if (s.length <= 6) return '***';
+      return s.slice(0,3) + '***' + s.slice(-3);
+    };
+    const ageMs = c?.createdAt ? (Date.now() - Number(c.createdAt)) : null;
+    const ttlMs = c?.expiresIn ? (Number(c.expiresIn) * 1000) : null;
+    res.json({
+      connection: {
+        isConnected: !!c?.isConnected,
+        accountId: c?.accountId || null,
+        loginCustomerId: c?.loginCustomerId || null,
+        hasAccessToken: !!c?.accessToken,
+        hasRefreshToken: !!c?.refreshToken,
+        createdAt: c?.createdAt || null,
+        ageMs,
+        expiresIn: c?.expiresIn || null,
+        expiresInMs: ttlMs,
+        oauthClientIdMasked: mask(c?.oauthClientId || '')
+      },
+      env: {
+        GOOGLE_ADS_CLIENT_ID: (process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim() ? 'set' : 'missing',
+        GOOGLE_ADS_CLIENT_SECRET: (process.env.GOOGLE_ADS_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '').trim() ? 'set' : 'missing',
+        GOOGLE_ADS_DEVELOPER_TOKEN: (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim() ? 'set' : 'missing',
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ message: 'debug failed', error: String(e) });
+  }
+});
+
+// Google Ads deep diagnose: attempt listAccessibleCustomers with all client pairs
+router.get('/api/googleads/diagnose', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const snap = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
+    const c = snap.val() || {};
+    const refreshToken: string | undefined = c.refreshToken;
+    const accessToken: string | undefined = c.accessToken;
+    const devToken = (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
+    const pairs: Array<{ label: string; id: string; secret: string }> = [];
+    const pushPair = (label: string, id?: string, secret?: string) => {
+      const i = (id || '').trim(); const s = (secret || '').trim();
+      if (i && s) pairs.push({ label, id: i, secret: s });
+    };
+    pushPair('stored', c.oauthClientId, undefined); // stored secret masked, skip if unknown
+    pushPair('ads', process.env.GOOGLE_ADS_CLIENT_ID, process.env.GOOGLE_ADS_CLIENT_SECRET);
+    pushPair('generic', process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+    // Deduplicate by id
+    const seen = new Set<string>();
+    const finalPairs = pairs.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+    const attempts: any[] = [];
+    // Helper: listAccessibleCustomers using provided access token
+    const tryList = async (token: string, version: string) => {
+      const url = `https://googleads.googleapis.com/${version}/customers:listAccessibleCustomers`;
+      const r = await fetch(url, { method: 'GET', headers: { Authorization: `Bearer ${token}`, 'developer-token': devToken } });
+      const txt = await r.text();
+      let json: any = null; try { json = JSON.parse(txt); } catch { json = { raw: txt }; }
+      return { status: r.status, ok: r.ok, body: json };
+    };
+    // If refresh needed, attempt with each pair
+    const refreshedTokens: Array<{ pair: any; token: any }> = [];
+    if (refreshToken) {
+      for (const pair of finalPairs) {
+        if (!pair.secret) continue; // skip stored without secret
+        try {
+          const params = new URLSearchParams();
+          params.append('client_id', pair.id);
+          params.append('client_secret', pair.secret);
+          params.append('refresh_token', refreshToken);
+          params.append('grant_type', 'refresh_token');
+          const tokenResp = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+          const tokenJson = await tokenResp.json();
+          attempts.push({ type: 'refresh', clientLabel: pair.label, clientId: pair.id, status: tokenResp.status, ok: tokenResp.ok, error: tokenJson.error || null });
+          if (tokenResp.ok && tokenJson.access_token) {
+            refreshedTokens.push({ pair, token: tokenJson });
+          }
+        } catch (e: any) {
+          attempts.push({ type: 'refresh', clientLabel: pair.label, clientId: pair.id, status: -1, ok: false, error: e?.message || String(e) });
+        }
+      }
+    }
+    // Try listAccessibleCustomers with existing accessToken first
+    if (accessToken) {
+      try {
+        const list17 = await tryList(accessToken, 'v17');
+        attempts.push({ type: 'listAccessibleCustomers', clientLabel: 'existing', version: 'v17', ...list17 });
+        if (!list17.ok) {
+          const list18 = await tryList(accessToken, 'v18');
+          attempts.push({ type: 'listAccessibleCustomers', clientLabel: 'existing', version: 'v18', ...list18 });
+        }
+      } catch (e: any) {
+        attempts.push({ type: 'listAccessibleCustomers', clientLabel: 'existing', version: 'v17', status: -1, ok: false, error: e?.message || String(e) });
+      }
+    }
+    // Try with each refreshed token
+    for (const rt of refreshedTokens) {
+      try {
+        const list17 = await tryList(rt.token.access_token, 'v17');
+        attempts.push({ type: 'listAccessibleCustomers', clientLabel: rt.pair.label, version: 'v17', ...list17 });
+        if (!list17.ok) {
+          const list18 = await tryList(rt.token.access_token, 'v18');
+          attempts.push({ type: 'listAccessibleCustomers', clientLabel: rt.pair.label, version: 'v18', ...list18 });
+        }
+      } catch (e: any) {
+        attempts.push({ type: 'listAccessibleCustomers', clientLabel: rt.pair.label, version: 'v17', status: -1, ok: false, error: e?.message || String(e) });
+      }
+    }
+    // Summarize probable root cause
+    let probable: string | null = null;
+    if (!devToken) probable = 'Developer token missing';
+    else if (!attempts.some(a => a.type === 'listAccessibleCustomers' && a.ok && Array.isArray(a.body?.resourceNames) && a.body.resourceNames.length)) {
+      const hasInvalidClient = attempts.some(a => String(a.body?.error?.message || '').match(/invalid_client/i));
+      if (hasInvalidClient) probable = 'OAuth client mismatch (reconnect using Ads client)';
+      else {
+        const permDenied = attempts.some(a => String(a.body?.error?.message || '').match(/permission|auth/i));
+        probable = permDenied ? 'Developer token or Google user lacks Ads account access' : 'No accessible customers returned';
+      }
+    } else {
+      probable = 'OK';
+    }
+    res.json({ userId, hasRefreshToken: !!refreshToken, hasAccessToken: !!accessToken, developerTokenPresent: !!devToken, attempts, probable });
+  } catch (e: any) {
+    res.status(500).json({ message: 'diagnose failed', error: e?.message || String(e) });
   }
 });
 
@@ -1922,6 +2308,18 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         }
         if (accountId) {
           await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
+          // Fire-and-forget initial ingest when account is chosen
+          try {
+            const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+            if (adminKey) {
+              const today = new Date();
+              const endD = new Date(today); endD.setDate(today.getDate() - 1);
+              const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+              const fmt = (d: Date) => d.toISOString().slice(0, 10);
+              const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+              fetchWithTimeout(`${buildAppBase(req)}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+            }
+          } catch {}
         }
         return res.json({ message: 'Google Ads bağlantısı güncellendi.', accountId, loginCustomerId });
       }
@@ -1933,6 +2331,27 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         }
         await admin.database().ref(`platformConnections/${userId}/tiktok/accountId`).set(accountId);
         return res.json({ message: 'TikTok reklam hesabı güncellendi.', accountId });
+      }
+      // LinkedIn Ads reklam hesabı güncelleme
+      if (platform === 'linkedin_ads') {
+        const accountId = req.body.accountId;
+        if (!accountId) {
+          return res.status(400).json({ message: 'Reklam hesabı ID eksik.' });
+        }
+        await admin.database().ref(`platformConnections/${userId}/linkedin_ads/accountId`).set(accountId);
+        // İlk ingest tetikle (son 7 gün) - fire and forget
+        try {
+          const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+          if (adminKey) {
+            const today = new Date();
+            const endD = new Date(today); endD.setDate(today.getDate() - 1);
+            const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+            const fmt = (d: Date) => d.toISOString().slice(0, 10);
+            const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+            fetchWithTimeout(`${buildAppBase(req)}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+          }
+        } catch {}
+        return res.json({ message: 'LinkedIn Ads reklam hesabı güncellendi.', accountId });
       }
       return res.status(400).json({ message: 'Desteklenmeyen platform.' });
     } catch (error) {
@@ -2208,6 +2627,79 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     }
   });
 
+  // Meta (Facebook/Instagram) summary from BigQuery (metrics_daily)
+  router.get('/api/meta/summary-bq', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      const clickMetric = (typeof req.query.clickMetric === 'string' ? req.query.clickMetric : 'all').toLowerCase();
+
+      // Default range: last 30 days ending yesterday
+      const today = new Date();
+      const endD = new Date(today); endD.setDate(today.getDate() - 1);
+      const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+      const fmt = (d: Date) => d.toISOString().slice(0, 10);
+      const since = typeof req.query.startDate === 'string' ? req.query.startDate : fmt(startD);
+      const until = typeof req.query.endDate === 'string' ? req.query.endDate : fmt(endD);
+
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const sql = `
+        SELECT date,
+               SUM(CAST(impressions AS INT64)) AS impressions,
+               SUM(CAST(clicks AS INT64)) AS clicks,
+               SUM(CAST(costMicros AS INT64)) AS costMicros
+        FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'meta_ads' AND date BETWEEN @start AND @end
+        GROUP BY date
+        ORDER BY date
+      `;
+      const [job] = await bq.createQueryJob({
+        query: sql,
+        params: { userId, start: since, end: until },
+        location: process.env.BQ_LOCATION || 'US',
+      });
+      const [rows] = await job.getQueryResults();
+
+      const map: Record<string, { impressions: number; clicks: number; spend: number; }> = {};
+      for (const r of rows as any[]) {
+        const d = String(r.date);
+        const impressions = Number(r.impressions || 0);
+        const clicks = Number(r.clicks || 0);
+        const spend = Number(r.costMicros || 0) / 1_000_000;
+        map[d] = { impressions, clicks, spend };
+      }
+
+      const series: Array<{ date: string; spend: number; impressions: number; clicks: number; ctr: number }> = [];
+      const cur = new Date(since);
+      const end = new Date(until);
+      while (cur <= end) {
+        const key = cur.toISOString().slice(0,10);
+        const v = map[key] || { impressions: 0, clicks: 0, spend: 0 };
+        const ctr = v.impressions > 0 ? (v.clicks / v.impressions) * 100 : 0;
+        series.push({ date: key, spend: v.spend, impressions: v.impressions, clicks: v.clicks, ctr });
+        cur.setDate(cur.getDate()+1);
+      }
+
+      const totals = series.reduce((acc, d) => {
+        acc.impressions += d.impressions;
+        acc.clicks += d.clicks;
+        acc.spend += d.spend;
+        return acc;
+      }, { impressions: 0, clicks: 0, spend: 0 });
+      const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+      const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+
+      return res.json({
+        rows: series,
+        totals: { spend: totals.spend, impressions: totals.impressions, clicks: totals.clicks, ctr, cpc, clickMetric },
+        requestedRange: { startDate: since, endDate: until }
+      });
+    } catch (error) {
+      console.error('[Meta SUMMARY BQ ERROR]', error);
+      return res.status(500).json({ message: 'Meta BQ özet verisi çekilemedi', error: String(error) });
+    }
+  });
+
   // Meta: Audiences summary (custom + lookalike counts)
   router.get('/api/meta/audiences/summary', async (req, res) => {
     try {
@@ -2381,12 +2873,12 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   router.get('/api/auth/searchconsole/connect', async (req, res) => {
     try {
       const userId = (req.query.userId as string) || 'test-user';
-      const clientId = process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '';
+      const clientId = ((process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '') as string).trim();
       // Normalize host to avoid 127.0.0.1 vs localhost mismatches in OAuth client settings
       const rawHost = req.get('host') || 'localhost:5001';
       const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
       const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/searchconsole/callback`;
-      const redirectUri = process.env.GOOGLE_SC_REDIRECT || computedRedirect;
+      const redirectUri = ((process.env.GOOGLE_SC_REDIRECT || computedRedirect) as string).trim();
       const scope = encodeURIComponent('https://www.googleapis.com/auth/webmasters.readonly');
       const state = encodeURIComponent(`${userId}:${Date.now()}`);
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&access_type=offline&prompt=consent&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`;
@@ -2404,13 +2896,13 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       const stateRaw = req.query.state as string | undefined;
       if (!code) return res.status(400).send('code eksik');
       const userId = stateRaw?.split(':')[0] || 'test-user';
-      const clientId = process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '';
-      const clientSecret = process.env.GOOGLE_SC_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || '';
+      const clientId = ((process.env.GOOGLE_SC_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || '') as string).trim();
+      const clientSecret = ((process.env.GOOGLE_SC_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || '') as string).trim();
       // Use the same host normalization as in the connect handler
       const rawHost = req.get('host') || 'localhost:5001';
       const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
       const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/searchconsole/callback`;
-      const redirectUri = process.env.GOOGLE_SC_REDIRECT || computedRedirect;
+      const redirectUri = ((process.env.GOOGLE_SC_REDIRECT || computedRedirect) as string).trim();
 
       const params = new URLSearchParams();
       params.append('code', code);
@@ -2594,24 +3086,14 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   });
   // Meta Reklam OAuth connect endpoint
   router.get('/api/auth/meta/connect', async (req, res) => {
-    const clientId = process.env.META_APP_ID;
-    const clientSecret = process.env.META_APP_SECRET;
+    const clientId = (process.env.META_APP_ID || '').trim();
+    const clientSecret = (process.env.META_APP_SECRET || '').trim();
     if (!clientId || !clientSecret) {
-      return res.status(500).json({
-        message: 'Meta OAuth yapılandırılmamış. Eksik ortam değişkenleri.',
-        missing: {
-          META_APP_ID: !clientId,
-          META_APP_SECRET: !clientSecret,
-        },
-        hint: 'Maint/server/env veya .env.production dosyasında META_APP_ID ve META_APP_SECRET ekleyin, sonra yeniden başlatın.',
-      });
+      return settingsRedirect(res, req, 'meta_ads', false);
     }
-    const rawHost = req.get('host') || 'localhost:5001';
-    const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
-    const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/meta/callback`;
-    // Eğer env'de yanlış bir port (örn. 5000) tanımlıysa yine de computed'ı tercih et
-    const redirectEnv = process.env.META_REDIRECT_URI;
-    const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+    const redirectEnv = (process.env.META_REDIRECT_URI || '').trim();
+    const computedRedirect = `${buildAppBase(req)}/api/auth/meta/callback`;
+    const redirectUri = (redirectEnv || computedRedirect).trim();
     const scope = [
       'ads_read',
       'ads_management',
@@ -2654,14 +3136,12 @@ router.post('/api/googleads/disconnect', async (req, res) => {
   return settingsRedirect(res, req, 'meta_ads', false);
     }
     try {
-      const rawHost = req.get('host') || 'localhost:5001';
-      const normalizedHost = rawHost.replace('127.0.0.1', 'localhost');
-      const computedRedirect = `${req.protocol}://${normalizedHost}/api/auth/meta/callback`;
-      const redirectEnv = process.env.META_REDIRECT_URI;
-      const redirectUri = (redirectEnv && /localhost:5000|127\.0\.0\.1:5000/.test(redirectEnv)) ? computedRedirect : (redirectEnv || computedRedirect);
+      const redirectEnv = (process.env.META_REDIRECT_URI || '').trim();
+      const computedRedirect = `${buildAppBase(req)}/api/auth/meta/callback`;
+      const redirectUri = (redirectEnv || computedRedirect).trim();
       const params = new URLSearchParams();
-      params.append('client_id', process.env.META_APP_ID!);
-      params.append('client_secret', process.env.META_APP_SECRET!);
+      params.append('client_id', (process.env.META_APP_ID || '').trim());
+      params.append('client_secret', (process.env.META_APP_SECRET || '').trim());
       params.append('redirect_uri', redirectUri);
       params.append('code', code);
       const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${params.toString()}`);
@@ -2674,8 +3154,8 @@ router.post('/api/googleads/disconnect', async (req, res) => {
       try {
         const exchangeUrl = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
         exchangeUrl.searchParams.set('grant_type', 'fb_exchange_token');
-        exchangeUrl.searchParams.set('client_id', process.env.META_APP_ID || '');
-        exchangeUrl.searchParams.set('client_secret', process.env.META_APP_SECRET || '');
+        exchangeUrl.searchParams.set('client_id', (process.env.META_APP_ID || '').trim());
+        exchangeUrl.searchParams.set('client_secret', (process.env.META_APP_SECRET || '').trim());
         exchangeUrl.searchParams.set('fb_exchange_token', accessToken);
         const longResp = await fetchWithTimeout(exchangeUrl.toString(), { method: 'GET' }, 10000);
         const longJson: any = await longResp.json();
@@ -2706,7 +3186,19 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         updatedAt: new Date().toISOString(),
       });
       console.log('[META CALLBACK] saved connection for userId=', userId, { accountId, accountName: accountName || undefined });
-  return settingsRedirect(res, req, 'meta_ads', true);
+      // Fire-and-forget initial BigQuery ingest for last 30 days
+      try {
+        const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+        if (adminKey) {
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+          fetchWithTimeout(`${buildAppBase(req)}/api/ingest/meta-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+        }
+      } catch {}
+      return settingsRedirect(res, req, 'meta_ads', true);
     } catch (err) {
   return settingsRedirect(res, req, 'meta_ads', false);
     }
@@ -3021,6 +3513,121 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     }
   });
 
+  // Analytics summary from BigQuery (GA4 tables)
+  router.get('/api/analytics/summary-bq', async (req, res) => {
+    try {
+      const userId = (req.query.userId as string) || 'test-user';
+      // Accept GA-style relative dates or ISO YYYY-MM-DD
+      const relOrStart = (req.query.startDate as string) || '7daysAgo';
+      const relOrEnd = (req.query.endDate as string) || 'yesterday';
+      const parseRel = (val: string): string => {
+        const today = new Date();
+        const tzFix = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        const isISO = /^\d{4}-\d{2}-\d{2}$/.test(val);
+        if (isISO) return val;
+        const lc = val.toLowerCase();
+        if (lc === 'today') return tzFix(today).toISOString().slice(0,10);
+        if (lc === 'yesterday') { const y = new Date(today); y.setDate(today.getDate()-1); return tzFix(y).toISOString().slice(0,10); }
+        const m = lc.match(/(\d+)daysago/);
+        if (m) { const n = Number(m[1]); const d = new Date(today); d.setDate(today.getDate()-n); return tzFix(d).toISOString().slice(0,10); }
+        return val;
+      };
+      const endISO = parseRel(relOrEnd);
+      let startISO = parseRel(relOrStart);
+      // If start was relative like 7daysAgo and end is yesterday, ensure inclusive range length
+      // GA semantics: 7daysAgo..yesterday includes 7 days; keep as parsed
+
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      // Ensure tables exist (best-effort, no-op if present)
+      try { await ensureGa4Tables(); } catch {}
+
+      const sql = `
+        SELECT date,
+               SUM(CAST(sessions AS INT64)) AS sessions,
+               AVG(CAST(avgSessionDurationSec AS FLOAT64)) AS avgSessionDurationSec,
+               SUM(CAST(activeUsers AS INT64)) AS activeUsers
+        FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+        WHERE userId = @userId AND date BETWEEN @start AND @end
+        GROUP BY date
+        ORDER BY date
+      `;
+      const [job] = await bq.createQueryJob({
+        query: sql,
+        params: { userId, start: startISO, end: endISO },
+        location: process.env.BQ_LOCATION || 'US',
+      });
+      const [rows] = await job.getQueryResults();
+
+      // Zero-fill date series
+      const map: Record<string, any> = {};
+      for (const r of rows as any[]) {
+        const d = String(r.date);
+        map[d] = {
+          sessions: Number(r.sessions || 0),
+          avgSessionDurationSec: Number(r.avgSessionDurationSec || 0),
+          activeUsers: Number(r.activeUsers || 0),
+        };
+      }
+      const cur = new Date(startISO);
+      const end = new Date(endISO);
+      const seq: Array<{ date: string; sessions: number; avgSessionDurationSec: number; activeUsers: number }> = [];
+      while (cur <= end) {
+        const key = cur.toISOString().slice(0,10);
+        const v = map[key] || { sessions: 0, avgSessionDurationSec: 0, activeUsers: 0 };
+        seq.push({ date: key, sessions: v.sessions, avgSessionDurationSec: v.avgSessionDurationSec, activeUsers: v.activeUsers });
+        cur.setDate(cur.getDate()+1);
+      }
+
+      // Compose GA-like response
+      const dimensionHeaders = [{ name: 'date' }];
+      const metricHeaders = [
+        { name: 'sessions' },
+        { name: 'newUsers' },
+        { name: 'activeUsers' },
+        { name: 'averageSessionDuration' },
+        { name: 'eventCount' },
+      ];
+      const toYYYYMMDD = (iso: string) => iso.replace(/-/g,'');
+      const dataRows = seq.map(r => ({
+        dimensionValues: [{ value: toYYYYMMDD(r.date) }],
+        metricValues: [
+          { value: String(r.sessions || 0) },
+          { value: '0' }, // newUsers not available in BQ table
+          { value: String(r.activeUsers || 0) },
+          { value: String(r.avgSessionDurationSec || 0) },
+          { value: '0' }, // eventCount not available
+        ]
+      }));
+      const totalsCalc = seq.reduce((acc, r) => {
+        acc.sessions += r.sessions;
+        acc.activeUsers += r.activeUsers;
+        acc.durationSum += r.avgSessionDurationSec;
+        acc.days += 1;
+        return acc;
+      }, { sessions: 0, activeUsers: 0, durationSum: 0, days: 0 } as any);
+      const totals = {
+        sessions: totalsCalc.sessions,
+        newUsers: 0,
+        activeUsers: totalsCalc.activeUsers,
+        averageSessionDuration: totalsCalc.days ? (totalsCalc.durationSum / totalsCalc.days) : 0,
+        eventCount: 0,
+      };
+
+      return res.json({
+        dimensionHeaders,
+        metricHeaders,
+        rows: dataRows,
+        totals,
+        requestedRange: { startDate: startISO, endDate: endISO },
+        channelApplied: (req.query.channel as string) || 'all',
+      });
+    } catch (e) {
+      console.error('[GA4 SUMMARY BQ ERROR]', e);
+      return res.status(500).json({ message: 'GA4 BQ özeti alınamadı', error: String(e) });
+    }
+  });
+
   // Google OAuth callback endpoint
   router.get('/api/auth/google/callback', async (req, res) => {
     const code = req.query.code;
@@ -3047,9 +3654,11 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     try {
       const params = new URLSearchParams();
       params.append('code', code as string);
-      params.append('client_id', process.env.GOOGLE_CLIENT_ID!);
-      params.append('client_secret', process.env.GOOGLE_CLIENT_SECRET!);
-      const effectiveRedirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+      const gaClientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+      const gaClientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+      params.append('client_id', gaClientId);
+      params.append('client_secret', gaClientSecret);
+      const effectiveRedirectUri = (process.env.GOOGLE_REDIRECT_URI || '').trim() || `${buildAppBase(req)}/api/auth/google/callback`;
       params.append('redirect_uri', effectiveRedirectUri);
       params.append('grant_type', 'authorization_code');
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -3105,6 +3714,18 @@ router.post('/api/googleads/disconnect', async (req, res) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
+      // Fire-and-forget initial GA4 ingest for last 7 days
+      try {
+        const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+        if (adminKey) {
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD), propertyId });
+          fetchWithTimeout(`${buildAppBase(req)}/api/ingest/ga4`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
+        }
+      } catch {}
   return settingsRedirect(res, req, 'google_analytics', true);
     } catch (err) {
       return res.redirect('/settings?connection=error&platform=google_analytics');
@@ -3113,11 +3734,12 @@ router.post('/api/googleads/disconnect', async (req, res) => {
 
   // Google Analytics OAuth connect endpoint
   router.get('/api/auth/google/connect', async (req, res) => {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
     if (!clientId) {
-      return res.status(500).json({ message: 'GOOGLE_CLIENT_ID is not configured on the server.' });
+      // UI akışını bozmayalım; Settings'e hata ile dönelim
+      return settingsRedirect(res, req, 'google_analytics', false);
     }
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const redirectUri = (process.env.GOOGLE_REDIRECT_URI || '').trim() || `${buildAppBase(req)}/api/auth/google/callback`;
     const scope = [
       'https://www.googleapis.com/auth/analytics.readonly',
       'https://www.googleapis.com/auth/analytics.edit',
@@ -3142,6 +3764,259 @@ router.post('/api/googleads/disconnect', async (req, res) => {
     if (!redirectUri) return res.status(500).json({ message: 'GOOGLE_REDIRECT_URI is not configured and computed redirect failed.' });
     res.redirect(authUrl);
   });
+/* ===================== LINKEDIN ADS INTEGRATION (OAuth + Analytics) ===================== */
+// Env vars: LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI
+// Stored under platformConnections/<uid>/linkedin_ads
+
+// Initiate LinkedIn OAuth (marketing scopes) - userId passed via state
+router.get('/api/auth/linkedin/connect', async (req, res) => {
+  try {
+    const clientId = (process.env.LINKEDIN_CLIENT_ID || '').trim();
+    const clientSecret = (process.env.LINKEDIN_CLIENT_SECRET || '').trim();
+    if (!clientId || !clientSecret) {
+      return settingsRedirect(res, req, 'linkedin_ads', false);
+    }
+    const base = buildAppBase(req);
+    const redirectEnv = (process.env.LINKEDIN_REDIRECT_URI || '').trim();
+    const computed = `${base}/api/auth/linkedin/callback`;
+    const redirectUri = (redirectEnv || computed).trim();
+    const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
+    const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
+    // Offline access needed for refresh token: use access_type=offline, prompt=consent equivalent for LinkedIn via scope w/ offline_access
+    const scope = [
+      'r_ads',            // read ads accounts
+      'r_ads_reporting',  // read ads analytics
+      'rw_ads',           // manage (future use)
+      'r_basicprofile',   // basic profile (to map user)
+      'offline_access'    // refresh token
+    ].join(' ');
+    const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent(scope)}` +
+      `&state=${encodeURIComponent(stateRaw)}`;
+    console.log('[LINKEDIN CONNECT]', { redirectUri, uid, stateRaw });
+    return res.redirect(authUrl);
+  } catch (e) {
+    return settingsRedirect(res, req, 'linkedin_ads', false);
+  }
+});
+
+// LinkedIn OAuth callback
+router.get('/api/auth/linkedin/callback', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
+  if (!code) return settingsRedirect(res, req, 'linkedin_ads', false);
+  let stateUserId: string | null = null;
+  if (stateParam) {
+    try {
+      const decoded = decodeURIComponent(stateParam);
+      if (decoded.startsWith('uid:')) stateUserId = decoded.split('|')[0].replace('uid:', '');
+    } catch {}
+  }
+  try {
+    const clientId = (process.env.LINKEDIN_CLIENT_ID || '').trim();
+    const clientSecret = (process.env.LINKEDIN_CLIENT_SECRET || '').trim();
+    const redirectEnv = (process.env.LINKEDIN_REDIRECT_URI || '').trim();
+    const base = buildAppBase(req);
+    const computed = `${base}/api/auth/linkedin/callback`;
+    const redirectUri = (redirectEnv || computed).trim();
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('code', code);
+    params.append('redirect_uri', redirectUri);
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    const tokenResp = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString()
+    });
+    const tokenJson: any = await tokenResp.json();
+    if (!tokenResp.ok || !tokenJson.access_token) {
+      return settingsRedirect(res, req, 'linkedin_ads', false);
+    }
+    const accessToken = tokenJson.access_token;
+    const expiresIn = tokenJson.expires_in;
+    // LinkedIn issues refresh_token only in certain flows; attempt second call if not present
+    let refreshToken: string | null = tokenJson.refresh_token || null;
+    const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
+    // Fetch basic profile to store reference (v2 me endpoint)
+    let profileId: string | null = null;
+    try {
+      const meResp = await fetch('https://api.linkedin.com/v2/me', { headers: { Authorization: `Bearer ${accessToken}` } });
+      const meJson: any = await meResp.json();
+      profileId = meJson?.id || null;
+    } catch {}
+    await admin.database().ref(`platformConnections/${userId}/linkedin_ads`).set({
+      platform: 'linkedin_ads',
+      isConnected: true,
+      accessToken,
+      refreshToken,
+      expiresIn,
+      createdAt: Date.now(),
+      updatedAt: new Date().toISOString(),
+      profileId,
+    });
+    // Fire-and-forget initial ingest (last 7 days)
+    try {
+      const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+      if (adminKey) {
+        const today = new Date();
+        const endD = new Date(today); endD.setDate(today.getDate() - 1);
+        const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+        const fmt = (d: Date) => d.toISOString().slice(0,10);
+        const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+        fetchWithTimeout(`${buildAppBase(req)}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
+      }
+    } catch {}
+    return settingsRedirect(res, req, 'linkedin_ads', true);
+  } catch (e) {
+    return settingsRedirect(res, req, 'linkedin_ads', false);
+  }
+});
+
+// LinkedIn ad accounts list
+router.get('/api/linkedin/accounts', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const snap = await admin.database().ref(`platformConnections/${userId}/linkedin_ads`).once('value');
+    const c = snap.val();
+    if (!c?.accessToken) return res.status(400).json({ message: 'LinkedIn bağlantısı yok.' });
+    // List accounts (sponsored accounts)
+    const url = 'https://api.linkedin.com/v2/adAccountsV2?count=50';
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${c.accessToken}` } });
+    const j: any = await r.json();
+    if (!r.ok) return res.status(r.status).json({ message: 'LinkedIn adAccounts alınamadı', error: j });
+    const elements = Array.isArray(j.elements) ? j.elements : [];
+    const accounts = elements.map((e: any) => {
+      const urn = e?.id || e?.account || e?.externalId || '';
+      const id = String(urn).replace(/urn:li:sponsoredAccount:/,'');
+      return { id, name: e?.name || id };
+    });
+    return res.json({ accounts });
+  } catch (e) {
+    return res.status(500).json({ message: 'LinkedIn hesapları çekilemedi', error: String(e) });
+  }
+});
+
+// LinkedIn summary (last 7 days, daily breakdown)
+router.get('/api/linkedin/summary', async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || 'test-user';
+    const snap = await admin.database().ref(`platformConnections/${userId}/linkedin_ads`).once('value');
+    const c = snap.val();
+    if (!c?.accessToken) return res.status(400).json({ message: 'LinkedIn bağlantısı yok.' });
+    let accountId = c?.accountId;
+    if (!accountId) {
+      // Try to auto-pick first account if not set
+      try {
+        const accResp = await fetch('https://api.linkedin.com/v2/adAccountsV2?count=1', { headers: { Authorization: `Bearer ${c.accessToken}` } });
+        const accJson: any = await accResp.json();
+        const first = accJson?.elements?.[0];
+        if (first) {
+          const urn = first?.id || '';
+          accountId = String(urn).replace(/urn:li:sponsoredAccount:/,'');
+          await admin.database().ref(`platformConnections/${userId}/linkedin_ads/accountId`).set(accountId);
+        }
+      } catch {}
+    }
+    if (!accountId) return res.status(400).json({ message: 'LinkedIn reklam hesabı seçilmedi.' });
+    // Date range
+    const today = new Date();
+    const endD = new Date(today); endD.setDate(today.getDate() - 1);
+    const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+    const fmtNum = (d: Date) => d.toISOString().slice(0,10).replace(/-/g,'');
+    const sinceNum = fmtNum(startD);
+    const untilNum = fmtNum(endD);
+    // adAnalytics request (pivot: ACCOUNT) - daily granularity by passing time granularity not directly available; emulate by splitting
+    const days: Date[] = []; const cursor = new Date(startD); while (cursor <= endD) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate()+1); }
+    const daily: Array<{ date: string; impressions: number; clicks: number; spend: number; }> = [];
+    for (const d of days) {
+      const dayStart = fmtNum(d); const dayEnd = fmtNum(d);
+      const body = {
+        pivot: 'ACCOUNT',
+        timeRange: { start: Number(dayStart), end: Number(dayEnd) },
+        accounts: [ `urn:li:sponsoredAccount:${accountId}` ],
+        fields: [ 'impressions', 'clicks', 'costInLocalCurrency' ]
+      } as any;
+      try {
+        const resp = await fetch('https://api.linkedin.com/v2/adAnalyticsV2', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.accessToken}` }, body: JSON.stringify(body)
+        });
+        const j: any = await resp.json();
+        const row = Array.isArray(j.elements) ? j.elements[0] : null;
+        daily.push({
+          date: d.toISOString().slice(0,10),
+          impressions: Number(row?.impressions || 0),
+          clicks: Number(row?.clicks || 0),
+          spend: Number(row?.costInLocalCurrency || 0),
+        });
+      } catch {
+        daily.push({ date: d.toISOString().slice(0,10), impressions: 0, clicks: 0, spend: 0 });
+      }
+    }
+    const totals = daily.reduce((acc, r) => { acc.impressions += r.impressions; acc.clicks += r.clicks; acc.spend += r.spend; return acc; }, { impressions: 0, clicks: 0, spend: 0 });
+    const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+    const cpc = totals.clicks > 0 ? totals.spend / totals.clicks : 0;
+    return res.json({ accountId, rows: daily, totals: { ...totals, ctr, cpc } });
+  } catch (e) {
+    return res.status(500).json({ message: 'LinkedIn özet alınamadı', error: String(e) });
+  }
+});
+
+// Ingest LinkedIn metrics into BigQuery (secured)
+router.post('/api/ingest/linkedin-ads', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
+    const uid = userId || 'test-user';
+    const startISO = from || new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
+    const endISO = to || new Date(Date.now() - 1*86400000).toISOString().slice(0,10);
+    const snap = await admin.database().ref(`platformConnections/${uid}/linkedin_ads`).once('value');
+    const c = snap.val();
+    if (!c?.accessToken) return res.status(400).json({ message: 'No LinkedIn access token' });
+    const accountId = c?.accountId;
+    if (!accountId) return res.status(400).json({ message: 'No LinkedIn accountId' });
+    const start = new Date(startISO); const end = new Date(endISO);
+    const days: Date[] = []; const cursor = new Date(start); while (cursor <= end) { days.push(new Date(cursor)); cursor.setDate(cursor.getDate()+1); }
+    const rowsToInsert: any[] = [];
+    const fmtNum = (d: Date) => d.toISOString().slice(0,10).replace(/-/g,'');
+    for (const d of days) {
+      const dayStart = fmtNum(d); const dayEnd = fmtNum(d);
+      const body = {
+        pivot: 'ACCOUNT',
+        timeRange: { start: Number(dayStart), end: Number(dayEnd) },
+        accounts: [ `urn:li:sponsoredAccount:${accountId}` ],
+        fields: [ 'impressions', 'clicks', 'costInLocalCurrency' ]
+      } as any;
+      try {
+        const resp = await fetch('https://api.linkedin.com/v2/adAnalyticsV2', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.accessToken}` }, body: JSON.stringify(body)
+        });
+        const j: any = await resp.json();
+        const row = Array.isArray(j.elements) ? j.elements[0] : null;
+        rowsToInsert.push({
+          userId: String(uid),
+          source: 'linkedin_ads',
+          date: d.toISOString().slice(0,10),
+          impressions: Number(row?.impressions || 0),
+          clicks: Number(row?.clicks || 0),
+          costMicros: Math.round(Number(row?.costInLocalCurrency || 0) * 1_000_000),
+          transactions: 0,
+          sessions: 0,
+          revenueMicros: 0,
+          campaignId: null,
+          adGroupId: null,
+        });
+      } catch {
+        rowsToInsert.push({ userId: String(uid), source: 'linkedin_ads', date: d.toISOString().slice(0,10), impressions: 0, clicks: 0, costMicros: 0, transactions: 0, sessions: 0, revenueMicros: 0, campaignId: null, adGroupId: null });
+      }
+    }
+    if (rowsToInsert.length) await insertMetrics(rowsToInsert);
+    res.json({ ok: true, inserted: rowsToInsert.length });
+  } catch (e: any) {
+    res.status(500).json({ message: 'LinkedIn ingest failed', error: e?.message || String(e) });
+  }
+});
+
 export default router;
 
 // Google Analytics property listesi endpointi
@@ -3282,5 +4157,516 @@ router.get('/api/analytics/properties', async (req, res) => {
     return res.json({ properties: allProperties, meEmail });
   } catch (err) {
     return res.status(500).json({ properties: [], error: 'server_error' });
+  }
+});
+
+// ===== BigQuery Admin/Test Endpoints (secured) =====
+function requireAdmin(req: express.Request, res: express.Response): boolean {
+  const key = process.env.ADMIN_API_KEY;
+  if (key) {
+    const header = req.header('x-admin-key');
+    if (header !== key) {
+      res.status(403).json({ message: 'forbidden' });
+      return false;
+    }
+    return true;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    res.status(403).json({ message: 'disabled in production' });
+    return false;
+  }
+  return true;
+}
+
+router.post('/api/bq/ensure', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { dataset, table } = await ensureDatasetAndTable();
+    res.json({ ok: true, dataset: dataset.id, table: table.id });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e?.message || 'error' });
+  }
+});
+
+router.post('/api/bq/insert-test', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { userId = 'demo', days = 7 } = (req.body || {}) as { userId?: string; days?: number };
+  try {
+    const today = new Date();
+    const rows = Array.from({ length: Number(days) }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const date = d.toISOString().slice(0, 10);
+      const clicks = Math.floor(100 + Math.random() * 400);
+      const impressions = Math.floor(clicks * (5 + Math.random() * 10));
+      const costMicros = Math.floor(clicks * (20000 + Math.random() * 100000));
+      const revenueMicros = Math.floor(clicks * (50000 + Math.random() * 200000));
+      return {
+        userId: String(userId),
+        source: ['google_ads', 'meta_ads', 'tiktok_ads'][i % 3],
+        date,
+        campaignId: `cmp_${i % 4}`,
+        adGroupId: `adg_${i % 7}`,
+        impressions,
+        clicks,
+        costMicros,
+        transactions: Math.floor(clicks * 0.02),
+        sessions: Math.floor(clicks * 1.4),
+        revenueMicros,
+      };
+    });
+    const result = await insertMetrics(rows);
+    res.json({ ok: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e?.message || 'error' });
+  }
+});
+
+router.get('/api/bq/summary', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const userId = String((req.query as any)?.userId || 'demo');
+    const from = String((req.query as any)?.from || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10));
+    const to = String((req.query as any)?.to || new Date().toISOString().slice(0, 10));
+    const rows = await queryByUserAndRange(userId, from, to);
+    res.json({ ok: true, rows });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e?.message || 'error' });
+  }
+});
+
+// ===== Admin: List GA4 connected users (secured) =====
+router.get('/api/admin/ga4/connected', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const snap = await admin.database().ref('platformConnections').once('value');
+    const all = snap.val() || {};
+    const list: Array<{ userId: string; propertyId?: string; hasAccessToken: boolean; hasRefreshToken: boolean }>= [];
+    for (const [uid, conns] of Object.entries<any>(all)) {
+      const ga = conns?.google_analytics || {};
+      if (ga && (ga.accessToken || ga.refreshToken)) {
+        list.push({
+          userId: uid,
+          propertyId: ga.propertyId,
+          hasAccessToken: !!ga.accessToken,
+          hasRefreshToken: !!ga.refreshToken,
+        });
+      }
+    }
+    // sort: prefer ones with propertyId and refreshToken
+    list.sort((a,b)=> (Number(!!b.propertyId)+Number(!!b.hasRefreshToken)) - (Number(!!a.propertyId)+Number(!!a.hasRefreshToken)));
+    return res.json({ ok: true, count: list.length, users: list.slice(0, 50) });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, message: e?.message || 'error' });
+  }
+});
+
+// ===== User Settings: Retention Days =====
+// GET settings
+router.get('/api/settings', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const snap = await admin.database().ref(`settings/${uid}`).once('value');
+    const val = snap.val() || {};
+    // Varsayılan retention
+    if (typeof val.retentionDays !== 'number') val.retentionDays = Number(process.env.DEFAULT_RETENTION_DAYS || 90);
+    return res.json(val);
+  } catch (e) {
+    return res.status(500).json({ message: 'Settings okunamadı' });
+  }
+});
+
+// ===== GA4 Ingest to BigQuery (secured) =====
+router.post('/api/ingest/ga4', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { userId, from, to, propertyId: bodyPropertyId, accessToken: bodyAccessToken } = (req.body || {}) as { userId?: string; from?: string; to?: string; propertyId?: string; accessToken?: string };
+    const uid = String(userId || 'test-user');
+    const startDate = (from && String(from)) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+
+    await ensureGa4Tables();
+
+    // Read GA connection from Firebase
+    const gaConnSnap = await admin.database().ref(`platformConnections/${uid}/google_analytics`).once('value');
+    const gaConn = gaConnSnap.val() || {};
+    const propertyId = (bodyPropertyId || (req.query.propertyId as string) || gaConn?.propertyId);
+    if (!propertyId) return res.status(400).json({ message: 'No GA4 property selected' });
+
+    // Access token refresh if needed (reuse logic similar to properties endpoint)
+    let accessToken: string = bodyAccessToken || gaConn.accessToken || '';
+    try {
+      if (!bodyAccessToken) {
+        const now = new Date();
+        const expiresAt = gaConn.expiresAt ? new Date(gaConn.expiresAt) : null;
+        if (gaConn.refreshToken && (!accessToken || !expiresAt || (expiresAt && expiresAt < now))) {
+          const tryRefresh = async () => {
+            const params1 = new URLSearchParams();
+            params1.append('client_id', process.env.GOOGLE_CLIENT_ID || '');
+            params1.append('client_secret', process.env.GOOGLE_CLIENT_SECRET || '');
+            params1.append('refresh_token', gaConn.refreshToken);
+            params1.append('grant_type', 'refresh_token');
+            let rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params1 }, 12000);
+            let dj = await rr.json();
+            if (!dj.access_token && process.env.GOOGLE_SC_CLIENT_ID && process.env.GOOGLE_SC_CLIENT_SECRET) {
+              const params2 = new URLSearchParams();
+              params2.append('client_id', process.env.GOOGLE_SC_CLIENT_ID || '');
+              params2.append('client_secret', process.env.GOOGLE_SC_CLIENT_SECRET || '');
+              params2.append('refresh_token', gaConn.refreshToken);
+              params2.append('grant_type', 'refresh_token');
+              rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params2 }, 12000);
+              dj = await rr.json();
+            }
+            return dj;
+          };
+          const data = await tryRefresh();
+          if (data.access_token) {
+            accessToken = data.access_token;
+            const newExpires = new Date(now.getTime() + (data.expires_in || 3600) * 1000);
+            await admin.database().ref(`platformConnections/${uid}/google_analytics`).update({
+              accessToken,
+              expiresAt: newExpires.toISOString(),
+              updatedAt: now.toISOString(),
+            });
+          }
+        }
+      }
+    } catch (_) {}
+    if (!accessToken) return res.status(400).json({ message: 'No GA access token' });
+
+    const baseUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${encodeURIComponent(propertyId)}:runReport`;
+    const headers = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' } as any;
+
+    // 1) Daily totals
+    const dailyBody = {
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [{ name: 'date' }],
+      metrics: [
+        { name: 'sessions' },
+        { name: 'averageSessionDuration' },
+        { name: 'activeUsers' },
+        { name: 'bounceRate' },
+      ],
+    };
+    let dailyResp = await fetchWithTimeout(baseUrl, { method: 'POST', headers, body: JSON.stringify(dailyBody) }, 20000);
+    let dailyJson: any = await dailyResp.json();
+    if (!dailyResp.ok && (dailyResp as any).status === 401 && gaConn.refreshToken && !bodyAccessToken) {
+      try {
+        const tryRefresh2 = async () => {
+          const params1 = new URLSearchParams();
+          params1.append('client_id', process.env.GOOGLE_CLIENT_ID || '');
+          params1.append('client_secret', process.env.GOOGLE_CLIENT_SECRET || '');
+          params1.append('refresh_token', gaConn.refreshToken);
+          params1.append('grant_type', 'refresh_token');
+          let rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params1 }, 12000);
+          let dj = await rr.json();
+          if (!dj.access_token && process.env.GOOGLE_SC_CLIENT_ID && process.env.GOOGLE_SC_CLIENT_SECRET) {
+            const params2 = new URLSearchParams();
+            params2.append('client_id', process.env.GOOGLE_SC_CLIENT_ID || '');
+            params2.append('client_secret', process.env.GOOGLE_SC_CLIENT_SECRET || '');
+            params2.append('refresh_token', gaConn.refreshToken);
+            params2.append('grant_type', 'refresh_token');
+            rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params2 }, 12000);
+            dj = await rr.json();
+          }
+          return dj;
+        };
+        const data = await tryRefresh2();
+        if (data.access_token) {
+          accessToken = data.access_token;
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          const now2 = new Date();
+          const newExpires2 = new Date(now2.getTime() + (data.expires_in || 3600) * 1000);
+          await admin.database().ref(`platformConnections/${uid}/google_analytics`).update({
+            accessToken,
+            expiresAt: newExpires2.toISOString(),
+            updatedAt: now2.toISOString(),
+          });
+          // retry once
+          dailyResp = await fetchWithTimeout(baseUrl, { method: 'POST', headers, body: JSON.stringify(dailyBody) }, 20000);
+          dailyJson = await dailyResp.json();
+        }
+      } catch (_) {}
+    }
+    if (!dailyResp.ok) return res.status(500).json({ message: 'GA4 daily report failed', details: dailyJson });
+    const dailyRows = Array.isArray(dailyJson.rows) ? dailyJson.rows : [];
+    const dailyToInsert = dailyRows.map((r: any) => {
+      const d = (r.dimensionValues?.[0]?.value || '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+      const m = (idx: number, fallback = 0) => Number(r.metricValues?.[idx]?.value || fallback);
+      return {
+        userId: uid,
+        date: d,
+        propertyId,
+        sessions: Math.round(m(0, 0)),
+        avgSessionDurationSec: m(1, 0),
+        activeUsers: Math.round(m(2, 0)),
+        bounceRate: m(3, 0),
+      };
+    });
+    if (dailyToInsert.length) await insertGa4Daily(dailyToInsert);
+
+    // 2) Geo by region per day
+    const geoBody = {
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [{ name: 'date' }, { name: 'region' }],
+      metrics: [ { name: 'sessions' }, { name: 'activeUsers' } ],
+    };
+    let geoResp = await fetchWithTimeout(baseUrl, { method: 'POST', headers, body: JSON.stringify(geoBody) }, 20000);
+    let geoJson: any = await geoResp.json();
+    if (!geoResp.ok && (geoResp as any).status === 401 && gaConn.refreshToken && !bodyAccessToken) {
+      // If token expired between calls, try one refresh and retry geo
+      try {
+        const tryRefresh3 = async () => {
+          const params1 = new URLSearchParams();
+          params1.append('client_id', process.env.GOOGLE_CLIENT_ID || '');
+          params1.append('client_secret', process.env.GOOGLE_CLIENT_SECRET || '');
+          params1.append('refresh_token', gaConn.refreshToken);
+          params1.append('grant_type', 'refresh_token');
+          let rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params1 }, 12000);
+          let dj = await rr.json();
+          if (!dj.access_token && process.env.GOOGLE_SC_CLIENT_ID && process.env.GOOGLE_SC_CLIENT_SECRET) {
+            const params2 = new URLSearchParams();
+            params2.append('client_id', process.env.GOOGLE_SC_CLIENT_ID || '');
+            params2.append('client_secret', process.env.GOOGLE_SC_CLIENT_SECRET || '');
+            params2.append('refresh_token', gaConn.refreshToken);
+            params2.append('grant_type', 'refresh_token');
+            rr = await fetchWithTimeout('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params2 }, 12000);
+            dj = await rr.json();
+          }
+          return dj;
+        };
+        const data = await tryRefresh3();
+        if (data.access_token) {
+          accessToken = data.access_token;
+          headers['Authorization'] = `Bearer ${accessToken}`;
+          geoResp = await fetchWithTimeout(baseUrl, { method: 'POST', headers, body: JSON.stringify(geoBody) }, 20000);
+          geoJson = await geoResp.json();
+        }
+      } catch (_) {}
+    }
+    if (geoResp.ok) {
+      const geoRows = Array.isArray(geoJson.rows) ? geoJson.rows : [];
+      const geoToInsert = geoRows.map((r: any) => {
+        const d = (r.dimensionValues?.[0]?.value || '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+        const region = String(r.dimensionValues?.[1]?.value || '');
+        const m = (idx: number, fallback = 0) => Number(r.metricValues?.[idx]?.value || fallback);
+        return {
+          userId: uid,
+          date: d,
+          propertyId,
+          region,
+          sessions: Math.round(m(0, 0)),
+          activeUsers: Math.round(m(1, 0)),
+        };
+      });
+      if (geoToInsert.length) await insertGa4GeoDaily(geoToInsert);
+    }
+
+    return res.json({ ok: true, insertedDaily: dailyToInsert.length, startDate, endDate, propertyId });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'GA4 ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// ===== Shopify Ingest to BigQuery (secured) =====
+router.post('/api/ingest/shopify', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
+    const uid = String(userId || 'test-user');
+    const startDate = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+
+    const shopSnap = await admin.database().ref(`platformConnections/${uid}/shopify`).once('value');
+    const shopConn = shopSnap.val() || {};
+    const storeUrl = String(shopConn.storeUrl || '').trim().replace(/^https?:\/\//,'').replace(/\/$/,'');
+    const accessToken = String(shopConn.accessToken || '');
+    if (!storeUrl || !accessToken) return res.status(400).json({ message: 'Shopify bağlantısı bulunamadı (storeUrl/accessToken)' });
+
+    const baseUrl = `https://${storeUrl}/admin/api/2023-10`;
+    const headers = { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } as any;
+
+    // Paginate orders between dates, status=paid/any
+    const params = new URLSearchParams({
+      status: 'any',
+      created_at_min: `${startDate}T00:00:00Z`,
+      created_at_max: `${endDate}T23:59:59Z`,
+      limit: '250',
+      fields: 'id,created_at,total_price,currency,financial_status',
+      order: 'created_at asc'
+    });
+    let nextUrl = `${baseUrl}/orders.json?${params.toString()}`;
+    const bucket: Record<string, { revenue: number; orders: number }>= {};
+    let pages = 0;
+    while (nextUrl && pages < 50) {
+      pages++;
+      const r = await fetchWithTimeout(nextUrl, { method: 'GET', headers }, 20000);
+      if (!r.ok) break;
+      const data: any = await r.json();
+      const orders = Array.isArray(data.orders) ? data.orders : [];
+      for (const o of orders) {
+        const date = String(o.created_at || '').slice(0,10);
+        const total = Number(o.total_price || 0);
+        if (!bucket[date]) bucket[date] = { revenue: 0, orders: 0 };
+        bucket[date].revenue += isFinite(total) ? total : 0;
+        bucket[date].orders += 1;
+      }
+      // pagination
+      const link = r.headers.get('link') || '';
+      const m = link.match(/<([^>]+)>; rel="next"/);
+      nextUrl = m ? m[1] : '';
+    }
+
+    const rows = Object.entries(bucket).map(([date, v]) => ({
+      userId: uid,
+      source: 'shopify',
+      date,
+      impressions: null as any,
+      clicks: null as any,
+      costMicros: null as any,
+      sessions: null as any,
+      transactions: v.orders,
+      revenueMicros: Math.round(v.revenue * 1_000_000),
+    }));
+    if (rows.length) await insertMetrics(rows as any);
+    return res.json({ ok: true, inserted: rows.length, startDate, endDate });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Shopify ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// ===== Google Ads Ingest to BigQuery (secured) =====
+router.post('/api/ingest/google-ads', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
+    const uid = String(userId || 'test-user');
+    const startDate = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+
+    const snap = await admin.database().ref(`platformConnections/${uid}/google_ads`).once('value');
+    const gads = snap.val() || {};
+    const refresh_token = gads.refreshToken || gads.refresh_token;
+    const customer_id = (gads.accountId || gads.customerId || '').replace(/-/g,'');
+    const login_customer_id = (gads.loginCustomerId || '').replace(/-/g,'') || undefined;
+    if (!refresh_token || !customer_id) return res.status(400).json({ message: 'Google Ads bağlantısı eksik (refresh_token/accountId)' });
+
+    const api = new GoogleAdsApi({
+      client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
+      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
+      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
+    });
+    const customer = (api as any).Customer({ customer_id, refresh_token, login_customer_id });
+    // GAQL günlük metrikler
+    const query = `
+      SELECT segments.date, campaign.id, metrics.impressions, metrics.clicks, metrics.cost_micros
+      FROM campaign
+      WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+    `;
+    let rows: any[] = [];
+    try {
+      rows = await customer.query(query);
+    } catch (err) {
+      return res.status(500).json({ message: 'Google Ads query failed', error: String(err) });
+    }
+    const toInsert = rows.map((r: any) => ({
+      userId: uid,
+      source: 'google_ads',
+      date: r.segments?.date,
+      campaignId: String(r.campaign?.id || ''),
+      impressions: Number(r.metrics?.impressions || 0),
+      clicks: Number(r.metrics?.clicks || 0),
+      costMicros: Number(r.metrics?.cost_micros || 0),
+      sessions: null as any,
+      transactions: null as any,
+      revenueMicros: null as any,
+    }));
+    if (toInsert.length) await insertMetrics(toInsert as any);
+    return res.json({ ok: true, inserted: toInsert.length, startDate, endDate });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Google Ads ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// ===== Meta Ads Ingest to BigQuery (secured) =====
+router.post('/api/ingest/meta-ads', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
+    const uid = String(userId || 'test-user');
+    const since = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const until = (to && String(to)) || new Date().toISOString().slice(0, 10);
+
+    const snap = await admin.database().ref(`platformConnections/${uid}/meta_ads`).once('value');
+    const meta = snap.val() || {};
+    const accessToken = meta.accessToken || process.env.META_ACCESS_TOKEN || '';
+    let adAccountId = meta.accountId || meta.adAccountId || '';
+    if (!adAccountId) return res.status(400).json({ message: 'Meta Ads bağlantısı eksik (accountId/accessToken)' });
+    if (!String(adAccountId).startsWith('act_')) adAccountId = 'act_' + String(adAccountId).replace(/[^0-9]/g,'');
+
+    const fields = [
+      'impressions','clicks','spend','actions','action_values','campaign_id','campaign_name','date_start'
+    ].join(',');
+    let url = `https://graph.facebook.com/v19.0/${encodeURIComponent(adAccountId)}/insights?fields=${fields}&level=campaign&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${encodeURIComponent(accessToken)}`;
+    let inserted = 0;
+    for (let page = 0; page < 10 && url; page++) {
+      const resp = await fetchWithTimeout(url, { method: 'GET' }, 20000);
+      const j: any = await resp.json();
+      if (!resp.ok) return res.status(500).json({ message: 'Meta insights failed', details: j });
+      const data = Array.isArray(j.data) ? j.data : [];
+      const toInsert = data.map((insight: any) => {
+        const date = insight.date_start;
+        const impressions = Number(insight.impressions || 0);
+        const clicks = Number(insight.clicks || 0);
+        const spend = Number(insight.spend || 0);
+        let purchases = 0;
+        let revenue = 0;
+        for (const a of (insight.actions || [])) {
+          if (a.action_type === 'purchase' || a.action_type === 'offsite_conversion.fb_pixel_purchase') purchases += Number(a.value || 0);
+        }
+        for (const av of (insight.action_values || [])) {
+          if (av.action_type === 'purchase' || av.action_type === 'offsite_conversion.fb_pixel_purchase') revenue += Number(av.value || 0);
+        }
+        return {
+          userId: uid,
+          source: 'meta_ads',
+          date,
+          campaignId: String(insight.campaign_id || ''),
+          impressions,
+          clicks,
+          costMicros: Math.round(spend * 1_000_000),
+          sessions: null as any,
+          transactions: purchases,
+          revenueMicros: Math.round(revenue * 1_000_000),
+        };
+      });
+      if (toInsert.length) {
+        await insertMetrics(toInsert as any);
+        inserted += toInsert.length;
+      }
+      url = (j.paging && j.paging.next) ? j.paging.next : '';
+    }
+    return res.json({ ok: true, inserted, since, until });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Meta Ads ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// POST settings (apply retention immediately)
+router.post('/api/settings', async (req, res) => {
+  try {
+    let userUid: any = req.headers['x-user-uid'] || req.query.userId || req.body?.userId;
+    if (Array.isArray(userUid)) userUid = userUid[0];
+    const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
+    const { retentionDays } = (req.body || {}) as { retentionDays?: number };
+    const days = Number(retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
+    await admin.database().ref(`settings/${uid}`).update({ retentionDays: days, updatedAt: Date.now() });
+    // Retention uygula (hemen temizlik yap)
+    try { await applyRetentionForUser(uid, days); } catch (e) { /* sessiz */ }
+    return res.json({ ok: true, retentionDays: days });
+  } catch (e) {
+    return res.status(500).json({ message: 'Settings kaydedilemedi' });
   }
 });

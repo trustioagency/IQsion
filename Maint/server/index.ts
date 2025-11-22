@@ -46,6 +46,8 @@ try {
 }
 
 const app = express();
+// Honor X-Forwarded-* headers behind proxies (Cloud Run, etc.)
+app.set('trust proxy', true);
 // Allow dev + configurable production origins (comma separated in CORS_ORIGINS)
 const corsEnv = process.env.CORS_ORIGINS || "";
 const dynamicOrigins = corsEnv

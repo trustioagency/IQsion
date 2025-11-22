@@ -6,9 +6,10 @@
     "dev": "vite --host 0.0.0.0",
     "dev:all": "concurrently -k -n FRONT,API -c green,cyan \"npm run dev\" \"npm --prefix Maint run dev\"",
     "build": "vite build",
-    "deploy:hosting": "npm run build && firebase deploy --only hosting:maint-ca347",
-    "deploy:hosting:all": "npm run build && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b",
-    "deploy:all": "npm run build && npm --prefix Maint run build && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b"
+    "build:with-marketing": "vite build && mkdir -p dist/marketing && cp -R marketing/* dist/marketing/",
+    "deploy:hosting": "npm run build:with-marketing && firebase deploy --only hosting:maint-ca347",
+    "deploy:hosting:all": "npm run build:with-marketing && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b",
+    "deploy:all": "npm run build:with-marketing && npm --prefix Maint run build && firebase deploy --only hosting:maint-ca347,hosting:maint-ca347-32f7b"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",

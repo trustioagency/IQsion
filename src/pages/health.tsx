@@ -24,7 +24,7 @@ const fetchConnections = async (uid?: string) => {
 
 const fetchMetaSummary = async (uid?: string) => {
   const qs = uid ? `?userId=${encodeURIComponent(uid)}` : '';
-  const res = await fetch(`/api/meta/summary${qs}`, { credentials: 'include' });
+  const res = await fetch(`/api/meta/summary-bq${qs}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Meta summary fetch failed');
   return res.json();
 };

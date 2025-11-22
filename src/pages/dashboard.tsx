@@ -213,7 +213,7 @@ export default function Dashboard() {
     enabled: !!user && !!selectedGaPropertyId,
     queryFn: async () => {
       const { startDate, endDate } = makeGaRange(dateRange);
-      const url = new URL('/api/analytics/summary', window.location.origin);
+      const url = new URL('/api/analytics/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('propertyId', selectedGaPropertyId!);
       url.searchParams.set('startDate', startDate);
@@ -255,7 +255,7 @@ export default function Dashboard() {
       // previous period: user-selected length ending before current range start
       const cur = getCurrentRangeDates(dateRange);
       const prev = getPreviousRangeWithLength(cur.startDate, daysForKey(compareDateRange));
-      const url = new URL('/api/analytics/summary', window.location.origin);
+      const url = new URL('/api/analytics/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('propertyId', selectedGaPropertyId!);
       url.searchParams.set('startDate', prev.startDate);
@@ -294,7 +294,7 @@ export default function Dashboard() {
     enabled: !!user && metaConnected && (selectedChannel === 'meta' || viewMode === 'cmo'),
     queryFn: async () => {
       const { startDate, endDate } = makeMetaRange(dateRange);
-      const url = new URL('/api/meta/summary', window.location.origin);
+      const url = new URL('/api/meta/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
@@ -316,7 +316,7 @@ export default function Dashboard() {
     enabled: !!user && googleAdsConnected,
     queryFn: async () => {
       const { startDate, endDate } = makeMetaRange(dateRange);
-      const url = new URL('/api/googleads/summary', window.location.origin);
+      const url = new URL('/api/googleads/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
@@ -333,7 +333,7 @@ export default function Dashboard() {
     queryFn: async () => {
       const cur = makeMetaRange(dateRange);
       const prev = getPreviousRangeWithLength(cur.startDate, daysForKey(compareDateRange));
-      const url = new URL('/api/meta/summary', window.location.origin);
+      const url = new URL('/api/meta/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', prev.startDate);
       url.searchParams.set('endDate', prev.endDate);
@@ -406,7 +406,7 @@ export default function Dashboard() {
     enabled: !!user && shopifyConnected && selectedChannel === 'shopify',
     queryFn: async () => {
       const { startDate, endDate } = makeShopifyRange(dateRange);
-      const url = new URL('/api/shopify/summary', window.location.origin);
+      const url = new URL('/api/shopify/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
@@ -423,7 +423,7 @@ export default function Dashboard() {
     enabled: !!user && shopifyConnected,
     queryFn: async () => {
       const { startDate, endDate } = makeShopifyRange(dateRange);
-      const url = new URL('/api/shopify/summary', window.location.origin);
+      const url = new URL('/api/shopify/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', startDate);
       url.searchParams.set('endDate', endDate);
@@ -441,7 +441,7 @@ export default function Dashboard() {
     queryFn: async () => {
       const cur = makeShopifyRange(dateRange);
       const prev = getPreviousRangeWithLength(cur.startDate, daysForKey(compareDateRange));
-      const url = new URL('/api/shopify/summary', window.location.origin);
+      const url = new URL('/api/shopify/summary-bq', window.location.origin);
       url.searchParams.set('userId', uid);
       url.searchParams.set('startDate', prev.startDate);
       url.searchParams.set('endDate', prev.endDate);

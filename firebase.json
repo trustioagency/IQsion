@@ -15,6 +15,7 @@
     ],
     "rewrites": [
       { "source": "/api/**", "run": { "serviceId": "iqsion-api", "region": "us-central1" } },
+      { "source": "/marketing/**", "destination": "/marketing/index.html" },
       { "source": "**", "destination": "/index.html" }
     ]
   }

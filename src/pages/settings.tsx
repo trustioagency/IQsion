@@ -118,6 +118,46 @@ export default function Settings() {
     }
   });
 
+  // Kullanıcı ayarları (veri saklama süresi)
+  const { data: userSettings, refetch: refetchSettings } = useQuery({
+    queryKey: ['user-settings', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/settings?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { retentionDays: 90 } as any;
+      return await res.json();
+    }
+  });
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('POST', `/api/settings?userId=${encodeURIComponent(uid)}`, payload);
+      if (!res.ok) throw new Error(await res.text());
+      return await res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Kaydedildi', description: 'Ayarlar güncellendi' });
+      refetchSettings();
+    },
+    onError: () => {
+      toast({ title: 'Hata', description: 'Ayarlar kaydedilemedi', variant: 'destructive' });
+    }
+  });
+
+  const [retentionValue, setRetentionValue] = useState<string>('90');
+  useEffect(() => {
+    if (userSettings && typeof (userSettings as any).retentionDays === 'number') {
+      setRetentionValue(String((userSettings as any).retentionDays));
+    }
+  }, [userSettings]);
+
+  const handleSaveRetention = () => {
+    const days = Number(retentionValue || '90');
+    saveSettingsMutation.mutate({ retentionDays: days });
+  };
+
   // Google Ads accounts list (for selection UI)
   const { data: googleAdAccounts, refetch: refetchGoogleAdsAccounts } = useQuery({
     queryKey: ['googleads-accounts', (user as any)?.uid || (user as any)?.id],
@@ -150,6 +190,18 @@ export default function Settings() {
       const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
       const res = await apiRequest('GET', `/api/tiktok/adaccounts?userId=${encodeURIComponent(uid)}`);
       if (!res.ok) return { data: { list: [] } } as any;
+      return await res.json();
+    }
+  });
+
+  // LinkedIn ad accounts list (for selection UI)
+  const { data: linkedinAccounts } = useQuery({
+    queryKey: ['linkedin-adaccounts', (user as any)?.uid || (user as any)?.id],
+    enabled: !!user && !!(connections as any)?.linkedin_ads?.isConnected,
+    queryFn: async () => {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/linkedin/accounts?userId=${encodeURIComponent(uid)}`);
+      if (!res.ok) return { accounts: [] } as any;
       return await res.json();
     }
   });
@@ -263,6 +315,9 @@ export default function Settings() {
           break;
         case 'tiktok':
           authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'linkedin_ads':
+          authUrl = `/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_search_console':
           {
@@ -396,7 +451,7 @@ export default function Settings() {
   const handleTestGoogleAdsConnection = async () => {
     try {
       const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
-      const res = await apiRequest('GET', `/api/googleads/summary?userId=${encodeURIComponent(uid)}`);
+      const res = await apiRequest('GET', `/api/googleads/summary-bq?userId=${encodeURIComponent(uid)}`);
       const data = await res.json();
       if (res.ok) {
         const totals = (data?.totals || {}) as any;
@@ -418,6 +473,23 @@ export default function Settings() {
       }
     } catch (e: any) {
       toast({ title: 'Google Ads test hatası', description: e?.message || 'İşlenemedi', variant: 'destructive' });
+    }
+  };
+
+  const handleTestLinkedinConnection = async () => {
+    try {
+      const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+      const res = await apiRequest('GET', `/api/linkedin/summary?userId=${encodeURIComponent(uid)}`);
+      const data = await res.json();
+      if (res.ok) {
+        const t = data?.totals || {};
+        const msg = `Hesap ${data?.accountId} • ${(t.clicks||0)} tıklama • ${(t.impressions||0)} gösterim • ${Number(t.spend||0).toFixed(2)} harcama`;
+        toast({ title: 'LinkedIn Ads bağlandı', description: msg });
+      } else {
+        toast({ title: 'LinkedIn Ads hatası', description: data?.message || 'Özet alınamadı', variant: 'destructive' });
+      }
+    } catch (e: any) {
+      toast({ title: 'LinkedIn Ads test hatası', description: e?.message || 'İşlenemedi', variant: 'destructive' });
     }
   };
 
@@ -587,6 +659,7 @@ export default function Settings() {
     google_analytics: <Globe className="w-5 h-5" />,
     google_search_console: <Globe className="w-5 h-5" />,
     tiktok: <User className="w-5 h-5" />,
+    linkedin_ads: <Link className="w-5 h-5" />,
   };
 
   const platforms = [
@@ -596,6 +669,7 @@ export default function Settings() {
     { id: 'google_analytics', name: 'Google Analytics', description: 'Website analizi ve trafik verileri' },
     { id: 'google_search_console', name: 'Google Search Console', description: 'Arama motoru optimizasyonu verileri' },
     { id: 'tiktok', name: 'TikTok Ads', description: 'TikTok reklam platformu' },
+    { id: 'linkedin_ads', name: 'LinkedIn Ads', description: 'LinkedIn reklam kampanyaları' },
   ];
 
   const handleTestShopifyConnection = async () => {
@@ -662,6 +736,46 @@ export default function Settings() {
                     </h3>
                     <p className="text-slate-400">{(user as UserType)?.email}</p>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Veri Saklama Süresi */}
+            <Card className="bg-slate-800 border-slate-700">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <SettingsIcon className="w-5 h-5" /> Veri Saklama Süresi
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="text-sm text-slate-300">
+                  Büyük sorgu maliyetlerini kontrol etmek için verilerin saklanacağı süreyi seçin. Daha kısa süre daha düşük maliyet ve daha hızlı sorgu demektir.
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Select value={retentionValue} onValueChange={setRetentionValue}>
+                    <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-48">
+                      <SelectValue placeholder="Süre seçin" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      <SelectItem value="30">30 gün</SelectItem>
+                      <SelectItem value="90">90 gün</SelectItem>
+                      <SelectItem value="180">180 gün</SelectItem>
+                      <SelectItem value="365">365 gün</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleSaveRetention} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
+                    {saveSettingsMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Kaydediliyor...
+                      </>
+                    ) : (
+                      'Kaydet'
+                    )}
+                  </Button>
+                </div>
+                <div className="text-xs text-slate-400">
+                  Not: Sistem genel üst sınırı 90 gün olarak ayarlıdır; daha kısa süre seçerseniz eski verileriniz hemen temizlenir.
                 </div>
               </CardContent>
             </Card>
@@ -927,6 +1041,86 @@ export default function Settings() {
                                     </Select>
                                   </div>
                                 )}
+                                {/* LinkedIn Ads hesap seçimi */}
+                                {platform.id === 'linkedin_ads' && isConnected && (
+                                  <div className="mt-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                      {(connections as any)?.linkedin_ads?.accountId && (
+                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).linkedin_ads.accountId}</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <Select
+                                        value={(connections as any)?.linkedin_ads?.accountId || ''}
+                                        onValueChange={async (value) => {
+                                          const uid = (user as any)?.uid || (user as any)?.id;
+                                          try {
+                                            const resp = await apiRequest('POST', '/api/connections', {
+                                              platform: 'linkedin_ads',
+                                              accountId: value,
+                                              userId: uid,
+                                            });
+                                            await resp.json();
+                                            toast({ title: 'Başarılı', description: 'LinkedIn Ads hesabı güncellendi' });
+                                            queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                              ...(prev || {}),
+                                              linkedin_ads: {
+                                                ...((prev && prev.linkedin_ads) || {}),
+                                                accountId: value,
+                                                isConnected: true,
+                                              },
+                                            }));
+                                          } catch (e) {
+                                            toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                          }
+                                        }}
+                                      >
+                                        <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                          <SelectValue placeholder={!linkedinAccounts ? 'Yükleniyor…' : ((linkedinAccounts?.accounts||[]).length ? 'Hesap seç' : 'Hesap bulunamadı')} />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                          {!(linkedinAccounts?.accounts || []).length && (
+                                            <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                          )}
+                                          {(linkedinAccounts?.accounts || []).map((acc: any) => (
+                                            <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.id}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      <Input
+                                        placeholder="Hesap ID gir (örn: 1234567)"
+                                        className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-44"
+                                        onKeyDown={async (e) => {
+                                          if (e.key === 'Enter') {
+                                            const value = (e.target as HTMLInputElement).value.trim();
+                                            if (!value) return;
+                                            const uid = (user as any)?.uid || (user as any)?.id;
+                                            try {
+                                              const resp = await apiRequest('POST', '/api/connections', {
+                                                platform: 'linkedin_ads',
+                                                accountId: value,
+                                                userId: uid,
+                                              });
+                                              await resp.json();
+                                              toast({ title: 'Kaydedildi', description: `Hesap ${value} seçildi` });
+                                              queryClient.setQueryData(['connections', uid], (prev: any) => ({
+                                                ...(prev || {}),
+                                                linkedin_ads: {
+                                                  ...((prev && prev.linkedin_ads) || {}),
+                                                  accountId: value,
+                                                  isConnected: true,
+                                                },
+                                              }));
+                                            } catch (err) {
+                                              toast({ title: 'Hata', description: 'Hesap kaydedilemedi', variant: 'destructive' });
+                                            }
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
                                 {/* Search Console site seçimi */}
                                 {platform.id === 'google_search_console' && isConnected && (
                                   <SearchConsoleSites connections={connections as any} />
@@ -990,6 +1184,11 @@ export default function Settings() {
                                   )}
                                   {platform.id === 'google_ads' && (
                                     <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestGoogleAdsConnection}>
+                                      Bağlantıyı test et
+                                    </Button>
+                                  )}
+                                  {platform.id === 'linkedin_ads' && (
+                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestLinkedinConnection}>
                                       Bağlantıyı test et
                                     </Button>
                                   )}
