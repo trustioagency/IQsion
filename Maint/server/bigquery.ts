@@ -9,6 +9,7 @@ let _bq: BigQuery | null = null;
 
 export function getBigQuery(): BigQuery {
   if (_bq) return _bq;
+  // Set default location on the client; dataset.get no longer accepts `location` in options
   _bq = new BigQuery({ location: BQ_LOCATION });
   return _bq;
 }
@@ -16,7 +17,7 @@ export function getBigQuery(): BigQuery {
 export async function ensureDatasetAndTable(): Promise<{ dataset: Dataset; table: Table }>
 {
   const bq = getBigQuery();
-  const [dataset] = await bq.dataset(BQ_DATASET).get({ autoCreate: true, location: BQ_LOCATION });
+  const [dataset] = await bq.dataset(BQ_DATASET).get({ autoCreate: true });
 
   const tableRef = dataset.table(BQ_TABLE);
   const [exists] = await tableRef.exists();
@@ -142,7 +143,7 @@ export async function applyRetentionForUser(userId: string, retentionDays: numbe
 // ===== GA4 specific tables =====
 export async function ensureGa4Tables() {
   const bq = getBigQuery();
-  const [dataset] = await bq.dataset(BQ_DATASET).get({ autoCreate: true, location: BQ_LOCATION });
+  const [dataset] = await bq.dataset(BQ_DATASET).get({ autoCreate: true });
 
   // ga4_daily: per date totals
   const daily = dataset.table('ga4_daily');
