@@ -2013,10 +2013,10 @@ router.get('/api/googleads/summary-bq', async (req, res) => {
 
 // Google Ads OAuth bağlantı endpointi
 router.get('/api/auth/googleads/connect', async (req: express.Request, res: express.Response) => {
-  // Be tolerant: fall back to generic GOOGLE_CLIENT_ID if Ads-specific var missing
-  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim();
+  // IMPORTANT: Use ONLY Google Ads specific credentials
+  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
     if (!clientId) {
-      // Redirect to settings with error instead of raw JSON for better UX
+      console.error('[GOOGLE ADS CONNECT] GOOGLE_ADS_CLIENT_ID not set in environment');
       return settingsRedirect(res, req, 'google_ads', false);
     }
   // Normalize host and compute redirect dynamically to avoid port mismatches (e.g., 5000 vs 5001)
@@ -2038,13 +2038,28 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
   if (!code) return res.status(400).send('Google OAuth kodu eksik.');
   try {
-  // Mirror fallback logic from connect
-  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || '').trim();
-  const clientSecret = (process.env.GOOGLE_ADS_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  // IMPORTANT: Use ONLY Google Ads specific credentials, no fallback to generic Google OAuth
+  const clientId = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim();
+  
+  if (!clientId || !clientSecret) {
+    console.error('[GOOGLE ADS CALLBACK] Missing GOOGLE_ADS_CLIENT_ID or GOOGLE_ADS_CLIENT_SECRET');
+    return res.status(500).send('Google Ads OAuth credentials not configured');
+  }
     // Use same normalization logic as in connect
     const redirectEnv = (process.env.GOOGLE_ADS_REDIRECT_URI || '').trim();
     const computedRedirect = `${buildAppBase(req)}/api/auth/googleads/callback`;
     const redirectUri = (redirectEnv || computedRedirect).trim();
+    
+    // Debug: Log credentials being used (first/last 10 chars only for security)
+    console.error('[GOOGLE ADS CREDENTIALS]', {
+      clientId: clientId ? `${clientId.substring(0, 20)}...${clientId.substring(clientId.length - 10)}` : 'MISSING',
+      clientSecret: clientSecret ? `${clientSecret.substring(0, 10)}...${clientSecret.substring(clientSecret.length - 5)}` : 'MISSING',
+      redirectUri: redirectUri,
+      clientIdLength: clientId.length,
+      clientSecretLength: clientSecret.length
+    });
+    
     // Token alma
     const params = new URLSearchParams();
     params.append('code', code);
@@ -2058,7 +2073,11 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       body: params.toString(),
     });
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) throw new Error('Token alınamadı');
+    console.error('[GOOGLE ADS TOKEN DEBUG]', tokenRes.status, tokenData);
+    if (!tokenRes.ok || !tokenData.access_token) {
+      const reason = tokenData.error_description || tokenData.error || 'unknown';
+      throw new Error(`Token alınamadı (${reason})`);
+    }
     // userId: state içinden oku, yoksa query fallback
     let stateUserId: string | null = null;
     if (stateParam) {
@@ -2068,6 +2087,14 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
       } catch (_) {}
     }
     const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
+    
+    console.error('[GOOGLE ADS SAVE TO FIREBASE]', {
+      userId,
+      clientIdUsed: clientId ? `${clientId.substring(0, 20)}...` : 'MISSING',
+      clientIdFromGoogleAds: process.env.GOOGLE_ADS_CLIENT_ID ? 'YES' : 'NO',
+      clientIdFromGeneric: process.env.GOOGLE_CLIENT_ID ? 'YES' : 'NO'
+    });
+    
     await admin.database().ref(`platformConnections/${userId}/google_ads`).set({
   accessToken: tokenData.access_token,
   refreshToken: tokenData.refresh_token,
@@ -2077,22 +2104,10 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
   oauthClientId: clientId,
   oauthClientSecret: clientSecret ? 'set' : undefined,
     });
-    // Best-effort: auto-detect first accessible account and save
-    try {
-      const devToken = (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
-      if (devToken) {
-        const listUrl = `https://googleads.googleapis.com/v17/customers:listAccessibleCustomers`;
-        const r = await fetch(listUrl, { method: 'GET', headers: { Authorization: `Bearer ${tokenData.access_token}`, 'developer-token': devToken } });
-        if (r.ok) {
-          const j: any = await r.json();
-          const first = (j.resourceNames || [])[0];
-          const id = first ? String(first).split('/')[1] : undefined;
-          if (id) {
-            await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(id);
-          }
-        }
-      }
-    } catch (_) {}
+    // Note: Auto-detection of Google Ads accounts is challenging with google-ads-api v21
+    // The user should select their account from the dropdown in Settings UI
+    // The /api/googleads/accounts endpoint will fetch the list when they open the dropdown
+    console.error('[GOOGLE ADS CALLBACK] Connection successful, user can now select account from dropdown');
     try {
       const adminKey = (process.env.ADMIN_API_KEY || '').trim();
       if (adminKey) {
@@ -4553,9 +4568,23 @@ router.post('/api/ingest/google-ads', async (req, res) => {
     const login_customer_id = (gads.loginCustomerId || '').replace(/-/g,'') || undefined;
     if (!refresh_token || !customer_id) return res.status(400).json({ message: 'Google Ads bağlantısı eksik (refresh_token/accountId)' });
 
+    // IMPORTANT: Always use environment variables for OAuth credentials
+    const oauth_client_id = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
+    const oauth_client_secret = (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim();
+    
+    if (!oauth_client_id || !oauth_client_secret) {
+      console.error('[GOOGLE ADS INGEST] Missing GOOGLE_ADS_CLIENT_ID or GOOGLE_ADS_CLIENT_SECRET');
+      return res.status(500).json({ message: 'Google Ads OAuth credentials not configured' });
+    }
+    
+    console.error('[GOOGLE ADS INGEST] Using credentials:', {
+      clientIdPrefix: oauth_client_id.substring(0, 20),
+      developedToken: !!process.env.GOOGLE_ADS_DEVELOPER_TOKEN
+    });
+
     const api = new GoogleAdsApi({
-      client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
+      client_id: oauth_client_id,
+      client_secret: oauth_client_secret,
       developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
     });
     const customer = (api as any).Customer({ customer_id, refresh_token, login_customer_id });

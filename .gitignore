@@ -4,9 +4,7 @@ dist/
 build/
 .env
 Maint/server/env
-Maint/server/*.json
-Maint/.env*
-Maint/.env.production
+Maint/server/maint-*.json
 *.log
 *.tmp
 
@@ -30,8 +28,3 @@ coverage/
 *.tar
 *.gz
 *.lock
-
-# Firebase/Service account (do not commit secrets)
-firebase-adminsdk-*.json
-*.serviceAccountKey.json
-*.credentials.json
