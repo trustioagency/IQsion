@@ -12,18 +12,25 @@ const ICONS: Record<'shopify' | 'meta' | 'tiktok' | 'googleanalytics', { path: s
 
 export default function BrandLogo({ name, size = 28, title, mono = false }: { name: BrandName; size?: number; title?: string; mono?: boolean }) {
   if (name === 'ikas') {
+    // İkas original logo - Green "ikas" text with distinctive styling
     return (
-      <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label={title || 'İkas'} shapeRendering="geometricPrecision">
-        <path d="M21 8 10 26h11l-3 14 19-26H26l3-6z" fill="#D7FF00"/>
+      <svg width={size} height={size * 0.4} viewBox="0 0 120 48" role="img" aria-label={title || 'İkas'}>
+        <text x="60" y="32" fontFamily="Arial, sans-serif" fontSize="32" fontWeight="700" fill="#00B67A" textAnchor="middle" letterSpacing="-1">
+          ikas
+        </text>
       </svg>
     );
   }
   if (name === 'googleads') {
+    // Google Ads logo - Three colored shapes (yellow triangle, green triangle, blue pill)
     return (
-      <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label={title || 'Google Ads'} shapeRendering="geometricPrecision">
-        <rect x="26" y="6" width="10" height="32" rx="5" fill="#4285F4" transform="rotate(30 31 22)"/>
-        <rect x="12" y="6" width="10" height="32" rx="5" fill="#34A853" transform="rotate(-30 17 22)"/>
-        <circle cx="14" cy="36" r="6" fill="#FBBC05"/>
+      <svg width={size} height={size} viewBox="0 0 192 192" role="img" aria-label={title || 'Google Ads'}>
+        {/* Yellow triangle (bottom left) */}
+        <path d="M40 150 L20 120 L60 120 Z" fill="#FBBC04"/>
+        {/* Green triangle (bottom center) */}
+        <path d="M96 150 L76 120 L116 120 Z" fill="#34A853"/>
+        {/* Blue elongated triangle/pill (top right) */}
+        <path d="M155 40 L175 90 L135 90 Z" fill="#4285F4"/>
       </svg>
     );
   }
