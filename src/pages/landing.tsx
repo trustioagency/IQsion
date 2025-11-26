@@ -19,7 +19,14 @@ import {
   ArrowRight,
   CheckCircle,
   Users,
-  ChevronDown
+  ChevronDown,
+  AlertCircle,
+  DollarSign,
+  ChevronRight,
+  Bell,
+  CircleDollarSign,
+  BarChart2,
+  LineChart
 } from "lucide-react";
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -30,7 +37,7 @@ export default function Landing() {
   const [chatMessage, setChatMessage] = useState('');
   const [activeAudience, setActiveAudience] = useState<'companies' | 'agencies' | 'entrepreneurs'>('companies');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
-  const [activeDashboardView, setActiveDashboardView] = useState<'overview' | 'ai' | 'channels'>('overview');
+  const [activeDashboardView, setActiveDashboardView] = useState<'overview' | 'ai' | 'audit' | 'team'>('overview');
   const [openModal, setOpenModal] = useState<'privacy' | 'terms' | 'cookies' | null>(null);
 
   // Hero typewriter headline phrases (TR/EN)
@@ -111,10 +118,12 @@ export default function Landing() {
           <div className="flex items-center h-24 w-full py-6">
             {/* Logo */}
             <a href="/" className="flex items-center gap-3 mr-10 group shrink-0" aria-label="IQsion Anasayfa">
-              <div className="w-8 h-8 bg-gradient-to-br from-gray-700 to-gray-900 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-xl font-semibold text-white group-hover:text-gray-300 transition-colors whitespace-nowrap">IQsion</span>
+              <img 
+                src="/iqsion.logo.png" 
+                alt="IQsion" 
+                className="h-12 w-auto mix-blend-lighten"
+              />
+              <span className="text-xl font-bold bg-gradient-to-r from-blue-800 to-blue-950 bg-clip-text text-transparent group-hover:from-blue-700 group-hover:to-blue-900 transition-all whitespace-nowrap">IQsion</span>
             </a>
             {/* Nav */}
             <nav className="hidden md:flex items-center gap-2 mx-auto whitespace-nowrap bg-gray-900/50 backdrop-blur-sm border border-gray-800 rounded-xl px-6 py-3">
@@ -136,7 +145,7 @@ export default function Landing() {
               </Button>
               <Button
                 onClick={handleStartTrial}
-                className="bg-gray-700 hover:bg-gray-600 text-white rounded-xl px-6 py-2 shadow-sm whitespace-nowrap transition-colors font-medium"
+                className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white rounded-xl px-6 py-2 shadow-sm whitespace-nowrap transition-all font-medium"
               >
                 {t('tryFree')}
               </Button>
@@ -150,18 +159,15 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-6xl mx-auto overflow-visible">
             <style>{`@keyframes blink{0%,100%{opacity:1}50%{opacity:0}} .caret-inline{display:inline-block;width:2px;height:0.9em;background:#9ca3af;margin-left:4px;vertical-align:-2px;animation:blink 1s step-end infinite}`}</style>
-            <Badge className="bg-gray-800 text-gray-200 border-gray-700 mb-6 px-4 py-2">
-              🚀 {language === 'tr' ? 'KOBİ\'ler için özel olarak tasarlandı' : 'Specially designed for SMEs'}
-            </Badge>
 
-            <h1 className="font-light text-white mb-6 leading-[1.15]">
+            <h1 className="font-light text-white mb-6 leading-[1.15] mt-8">
               <span className="block text-[clamp(20px,2.6vw,36px)] font-normal">{language === 'tr' ? 'Markalar için' : 'For Brands'}</span>
-              <span className="block text-white whitespace-nowrap tracking-tight text-[clamp(28px,5.2vw,64px)] font-light">
+              <span className="block bg-gradient-to-r from-blue-800 to-blue-950 bg-clip-text text-transparent whitespace-nowrap tracking-tight text-[clamp(28px,5.2vw,64px)] font-bold">
                 {typedText}<span className="caret-inline" aria-hidden="true"></span>
               </span>
             </h1>
 
-            <p className="text-lg sm:text-xl text-gray-300 mb-8 leading-relaxed max-w-5xl mx-auto [text-wrap:balance]">
+            <p className="text-base sm:text-lg text-gray-400 mb-8 leading-relaxed max-w-5xl mx-auto [text-wrap:balance] font-light">
               {descText}
             </p>
 
@@ -169,17 +175,17 @@ export default function Landing() {
               <Button 
                 size="lg" 
                 onClick={handleStartTrial}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-8 py-4 rounded-xl font-medium text-lg shadow-md transition-colors"
+                className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white px-8 py-4 rounded-xl font-light text-base shadow-md transition-all"
               >
                 {t('tryFree')}
-                <ArrowRight className="w-5 h-5 ml-2" />
+                <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
               <Button 
                 size="lg" 
                 variant="ghost"
-                className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-4 rounded-xl font-medium text-lg shadow-md transition-colors"
+                className="border-2 border-blue-800 text-white hover:bg-gradient-to-r hover:from-blue-800 hover:to-blue-950 hover:text-white px-8 py-4 rounded-xl font-light text-base shadow-md transition-all"
               >
-                <Play className="w-5 h-5 mr-2" />
+                <Play className="w-4 h-4 mr-2" />
                 {t('watchDemo')}
               </Button>
             </div>
@@ -189,71 +195,54 @@ export default function Landing() {
               <div className="flex items-center justify-center gap-6 whitespace-nowrap overflow-x-auto hide-scrollbar px-2">
                 <span className="inline-flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  <span>Kredi kartı gerektirmez</span>
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-green-500" />
                   <span>5 dakikada kurulum</span>
                 </span>
                 <span className="inline-flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  <span>24/7 destek</span>
+                  <span>7/24 Destek</span>
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  <span>Kredi kartı gerektirmez</span>
                 </span>
               </div>
 
-              <div className="mt-8">
-                <div className="flex items-center justify-center mb-3">
-                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{t('integratedPlatforms')}</span>
-                </div>
-                <style>{`@keyframes marqueePlatforms { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } } .platforms-track { animation: marqueePlatforms 28s linear infinite; }`}</style>
-                <div className="relative overflow-hidden">
-                  <div className="flex platforms-track w-[200%] gap-10 py-2 opacity-95">
-                    {[1,2].map(loop => (
-                      <div key={loop} className="flex items-center justify-around w-1/2 gap-8">
-                        {/* Shopify */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="shopify" size={36} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">Shopify</span>
+              {/* References Marquee */}
+              <div className="mt-12">
+                <style>{`@keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } } .marquee-track { animation: marquee 40s linear infinite; will-change: transform; }`}</style>
+                <div className="overflow-hidden">
+                  <h3 className="text-center text-base font-medium text-gray-300 mb-12">Türkiye'nin önde gelen e-ticaret markalarının güvendiği platform</h3>
+                  <div className="relative">
+                    <div className="flex marquee-track w-[200%]">
+                      {[1,2].map(loop => (
+                        <div key={loop} className="flex items-center w-1/2 gap-16" style={{justifyContent: 'space-evenly'}}>
+                          {/* Hepsiburada */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 200 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">hepsiburada</text>
+                          </svg>
+                          {/* Trendyol */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 160 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">trendyol</text>
+                          </svg>
+                          {/* Çiçeksepeti */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 180 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">çiçeksepeti</text>
+                          </svg>
+                          {/* N11 */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 80 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">n11</text>
+                          </svg>
+                          {/* GittiGidiyor */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 180 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">gittigidiyor</text>
+                          </svg>
+                          {/* Morhipo */}
+                          <svg className="h-8 text-gray-400 opacity-50 hover:opacity-70 transition-opacity grayscale" viewBox="0 0 140 40" fill="none">
+                            <text x="0" y="28" fontFamily="Arial, sans-serif" fontSize="26" fontWeight="700" fill="currentColor">morhipo</text>
+                          </svg>
                         </div>
-                        {/* İkas */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="ikas" size={34} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">İkas</span>
-                        </div>
-                        {/* Meta */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="meta" size={36} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">Meta</span>
-                        </div>
-                        {/* Google Ads */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="googleads" size={36} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">Google Ads</span>
-                        </div>
-                        {/* Google Analytics */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="googleanalytics" size={34} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">Analytics</span>
-                        </div>
-                        {/* TikTok */}
-                        <div className="flex flex-col items-center gap-2 min-w-[80px]">
-                          <div className="h-10 flex items-center justify-center">
-                            <BrandLogo name="tiktok" size={32} />
-                          </div>
-                          <span className="text-[11px] font-medium text-gray-400">TikTok</span>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -262,24 +251,154 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* References Marquee */}
-      <section id="references" className="py-10 bg-gray-950">
-        <style>{`@keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } } .marquee-track { animation: marquee 30s linear infinite; will-change: transform; }`}</style>
-        <div className="max-w-7xl mx-auto px-4 overflow-hidden">
-          <h3 className="text-center text-sm font-medium text-gray-400 tracking-wider mb-6">{t('references')}</h3>
-          <div className="relative">
-            <div className="flex marquee-track w-[200%]">
-              {[1,2].map(loop => (
-                <div key={loop} className="flex items-center justify-around w-1/2 gap-16">
-                  {['Hepsiburada','Trendyol','Amazon','Ebay','N11','GittiGidiyor','Migros'].map((brand,idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <div className="h-8 w-24 bg-gray-800 rounded flex items-center justify-center text-[11px] font-semibold text-gray-300 border border-gray-700">
-                        {brand}
-                      </div>
-                    </div>
-                  ))}
+      {/* Integrated Platforms */}
+      <section id="platforms" className="py-20 bg-gray-950 border-t border-gray-900">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-light text-white mb-3">
+              Tüm Verileriniz Tek Noktada
+            </h2>
+            <p className="text-lg text-gray-400">
+              O da <span className="bg-gradient-to-r from-blue-800 to-blue-950 bg-clip-text text-transparent font-semibold">akıllı bir nokta</span>
+            </p>
+          </div>
+          
+          <style>{`
+            @keyframes rotate { 
+              from { transform: rotate(0deg); } 
+              to { transform: rotate(360deg); } 
+            }
+            .orbit-track { 
+              animation: rotate 30s linear infinite; 
+            }
+            .platform-item {
+              animation: rotate 30s linear infinite reverse;
+            }
+            @keyframes pulse-line {
+              0%, 100% { opacity: 0; }
+              50% { opacity: 0.4; }
+            }
+            .connection-line {
+              animation: pulse-line 3s ease-in-out infinite;
+            }
+          `}</style>
+          
+          <div className="relative flex items-center justify-center" style={{minHeight: '400px'}}>
+            {/* Center - IQsion Logo */}
+            <div className="absolute z-20 w-28 h-28 flex items-center justify-center">
+              <img 
+                src="/iqsion.logo.png" 
+                alt="IQsion" 
+                className="w-full h-full object-contain mix-blend-lighten drop-shadow-2xl"
+              />
+            </div>
+
+            {/* Connection lines from center to platforms */}
+            <svg className="absolute inset-0" style={{width: '100%', height: '100%', pointerEvents: 'none'}}>
+              <line x1="50%" y1="50%" x2="50%" y2="10%" className="connection-line" stroke="#1e40af" strokeWidth="1" />
+              <line x1="50%" y1="50%" x2="65%" y2="15%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '0.4s'}} />
+              <line x1="50%" y1="50%" x2="82%" y2="50%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '0.8s'}} />
+              <line x1="50%" y1="50%" x2="65%" y2="85%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '1.2s'}} />
+              <line x1="50%" y1="50%" x2="50%" y2="90%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '1.6s'}} />
+              <line x1="50%" y1="50%" x2="35%" y2="85%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '2s'}} />
+              <line x1="50%" y1="50%" x2="18%" y2="50%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '2.4s'}} />
+              <line x1="50%" y1="50%" x2="35%" y2="15%" className="connection-line" stroke="#1e40af" strokeWidth="1" style={{animationDelay: '2.8s'}} />
+            </svg>
+
+            {/* Rotating orbit container */}
+            <div className="orbit-track absolute" style={{width: '380px', height: '380px'}}>
+              {/* Meta - Top */}
+              <div className="platform-item absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center text-gray-400">
+                    <BrandLogo name="meta" size={32} mono={true} />
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">Meta</span>
                 </div>
-              ))}
+              </div>
+
+              {/* Google Ads - Top Right */}
+              <div className="platform-item absolute" style={{top: '7%', right: '18%'}}>
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center">
+                    <svg width={32} height={32} viewBox="0 0 192 192" className="text-gray-400">
+                      {/* Blue pill shape - top right */}
+                      <path d="M120 40 Q150 40 150 70 Q150 100 120 100 L90 100 Q120 100 120 70 Q120 40 90 40 Z" fill="currentColor" opacity="0.8"/>
+                      {/* Yellow triangle - left */}
+                      <path d="M40 120 L80 60 L80 120 Z" fill="currentColor" opacity="0.6"/>
+                      {/* Green circle - bottom left */}
+                      <circle cx="60" cy="140" r="25" fill="currentColor" opacity="0.5"/>
+                    </svg>
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">Google Ads</span>
+                </div>
+              </div>
+
+              {/* Shopify - Right */}
+              <div className="platform-item absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center text-gray-400">
+                    <BrandLogo name="shopify" size={32} mono={true} />
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">Shopify</span>
+                </div>
+              </div>
+
+              {/* TikTok - Bottom Right */}
+              <div className="platform-item absolute" style={{bottom: '7%', right: '18%'}}>
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center text-gray-400">
+                    <BrandLogo name="tiktok" size={28} mono={true} />
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">TikTok</span>
+                </div>
+              </div>
+
+              {/* Analytics - Bottom */}
+              <div className="platform-item absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center text-gray-400">
+                    <BrandLogo name="googleanalytics" size={30} mono={true} />
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">Analytics</span>
+                </div>
+              </div>
+
+              {/* İkas - Bottom Left */}
+              <div className="platform-item absolute" style={{bottom: '7%', left: '18%'}}>
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center">
+                    <span className="text-[20px] font-bold text-gray-400">ikas</span>
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">İkas</span>
+                </div>
+              </div>
+
+              {/* LinkedIn - Left */}
+              <div className="platform-item absolute top-1/2 left-0 -translate-x-1/2 -translate-y-1/2">
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center">
+                    <svg width={32} height={32} viewBox="0 0 192 192" className="text-gray-400" fill="currentColor">
+                      <rect x="30" y="30" width="132" height="132" rx="20"/>
+                      <text x="96" y="125" textAnchor="middle" fontSize="90" fontWeight="700" fill="black">in</text>
+                    </svg>
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400">LinkedIn</span>
+                </div>
+              </div>
+
+              {/* Search Console - Top Left */}
+              <div className="platform-item absolute" style={{top: '7%', left: '18%'}}>
+                <div className="flex flex-col items-center gap-1">
+                  <div className="h-10 flex items-center justify-center">
+                    <svg width={32} height={32} viewBox="0 0 192 192" className="text-gray-400">
+                      <circle cx="96" cy="96" r="70" fill="none" stroke="currentColor" strokeWidth="12"/>
+                      <path d="M96 40 L96 96 L140 96" stroke="currentColor" strokeWidth="12" strokeLinecap="round"/>
+                    </svg>
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-400 whitespace-nowrap">Console</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -290,15 +409,18 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-light text-white mb-4">
-              Tüm Pazarlama Verileriniz Tek Noktada
+              Pazarlama Yönetimini Yeniden Tanımlayın
             </h2>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              Real-time dashboard ile performansınızı takip edin, AI önerileri alın ve otomatik eylemler gerçekleştirin.
+            <p className="text-lg font-light text-gray-400 max-w-3xl mx-auto">
+              {activeDashboardView === 'overview' && 'Real-time dashboard ile tüm metriklerinizi anlık takip edin'}
+              {activeDashboardView === 'ai' && 'Yapay zeka size ne yapmanız gerektiğini söyler, siz sadece onaylayın'}
+              {activeDashboardView === 'audit' && 'Sitenizi otomatik tarıyor, sorunları tespit edip çözüm üretiyor'}
+              {activeDashboardView === 'team' && 'Ekibinizle aynı platform üzerinde işbirliği yapın, onay süreçlerini yönetin'}
             </p>
           </div>
 
           {/* Dashboard View Tabs */}
-          <div className="flex justify-center gap-3 mb-8">
+          <div className="flex justify-center gap-3 mb-8 flex-wrap">
             <button 
               onClick={() => setActiveDashboardView('overview')}
               className={`px-6 py-2.5 rounded-xl border font-medium transition-colors text-sm ${
@@ -320,14 +442,24 @@ export default function Landing() {
               AI Önerileri
             </button>
             <button 
-              onClick={() => setActiveDashboardView('channels')}
+              onClick={() => setActiveDashboardView('audit')}
               className={`px-6 py-2.5 rounded-xl border font-medium transition-colors text-sm ${
-                activeDashboardView === 'channels' 
+                activeDashboardView === 'audit' 
                   ? 'bg-gray-800 text-white border-gray-700' 
                   : 'bg-gray-900/50 text-gray-400 border-gray-800 hover:bg-gray-800 hover:text-white'
               }`}
             >
-              Kanal Performansı
+              Teknik Audit
+            </button>
+            <button 
+              onClick={() => setActiveDashboardView('team')}
+              className={`px-6 py-2.5 rounded-xl border font-medium transition-colors text-sm ${
+                activeDashboardView === 'team' 
+                  ? 'bg-gray-800 text-white border-gray-700' 
+                  : 'bg-gray-900/50 text-gray-400 border-gray-800 hover:bg-gray-800 hover:text-white'
+              }`}
+            >
+              Ekip & İşbirliği
             </button>
           </div>
 
@@ -568,79 +700,234 @@ export default function Landing() {
                   </div>
                 )}
 
-                {/* Channel Performance View */}
-                {activeDashboardView === 'channels' && (
+                {/* Technical Audit View */}
+                {activeDashboardView === 'audit' && (
                   <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Audit Score Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                       <Card className="bg-gray-900 border border-gray-700">
                         <CardContent className="p-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-white font-medium">Google Ads</h4>
-                            <Badge className="bg-green-500/20 text-green-400">Aktif</Badge>
+                          <h4 className="text-gray-400 text-sm mb-2">SEO Skoru</h4>
+                          <div className="flex items-end gap-2">
+                            <p className="text-4xl font-bold text-green-400">87</p>
+                            <span className="text-gray-500 text-sm mb-1">/100</span>
                           </div>
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-gray-400 text-sm">Harcama</p>
-                              <p className="text-white text-xl font-medium">₺185,420</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">ROAS</p>
-                              <p className="text-white text-xl font-medium">3.8x</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">Dönüşüm</p>
-                              <p className="text-white text-xl font-medium">4,230</p>
-                            </div>
+                          <div className="mt-3 h-2 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-green-500" style={{width: '87%'}}></div>
                           </div>
                         </CardContent>
                       </Card>
 
                       <Card className="bg-gray-900 border border-gray-700">
                         <CardContent className="p-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-white font-medium">Meta Ads</h4>
-                            <Badge className="bg-green-500/20 text-green-400">Aktif</Badge>
+                          <h4 className="text-gray-400 text-sm mb-2">Performance</h4>
+                          <div className="flex items-end gap-2">
+                            <p className="text-4xl font-bold text-yellow-400">72</p>
+                            <span className="text-gray-500 text-sm mb-1">/100</span>
                           </div>
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-gray-400 text-sm">Harcama</p>
-                              <p className="text-white text-xl font-medium">₺142,850</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">ROAS</p>
-                              <p className="text-white text-xl font-medium">4.1x</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">Dönüşüm</p>
-                              <p className="text-white text-xl font-medium">3,680</p>
-                            </div>
+                          <div className="mt-3 h-2 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-yellow-500" style={{width: '72%'}}></div>
                           </div>
                         </CardContent>
                       </Card>
 
                       <Card className="bg-gray-900 border border-gray-700">
                         <CardContent className="p-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-white font-medium">TikTok Ads</h4>
-                            <Badge className="bg-green-500/20 text-green-400">Aktif</Badge>
+                          <h4 className="text-gray-400 text-sm mb-2">Accessibility</h4>
+                          <div className="flex items-end gap-2">
+                            <p className="text-4xl font-bold text-green-400">94</p>
+                            <span className="text-gray-500 text-sm mb-1">/100</span>
                           </div>
+                          <div className="mt-3 h-2 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-green-500" style={{width: '94%'}}></div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-gray-900 border border-gray-700">
+                        <CardContent className="p-6">
+                          <h4 className="text-gray-400 text-sm mb-2">Best Practices</h4>
+                          <div className="flex items-end gap-2">
+                            <p className="text-4xl font-bold text-orange-400">68</p>
+                            <span className="text-gray-500 text-sm mb-1">/100</span>
+                          </div>
+                          <div className="mt-3 h-2 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-orange-500" style={{width: '68%'}}></div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Issues List */}
+                    <Card className="bg-gray-800/50 border border-gray-700">
+                      <CardContent className="p-6">
+                        <h3 className="text-white font-medium mb-4">Tespit Edilen Sorunlar</h3>
+                        <div className="space-y-3">
+                          <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                            <div className="w-6 h-6 bg-red-500/20 rounded flex items-center justify-center shrink-0 mt-0.5">
+                              <span className="text-red-400 text-xs">!</span>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white font-medium text-sm">Kritik: Eksik meta açıklamaları</p>
+                              <p className="text-gray-400 text-xs mt-1">12 sayfa meta description içermiyor</p>
+                            </div>
+                            <Badge className="bg-red-500/20 text-red-400">Yüksek</Badge>
+                          </div>
+
+                          <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                            <div className="w-6 h-6 bg-yellow-500/20 rounded flex items-center justify-center shrink-0 mt-0.5">
+                              <span className="text-yellow-400 text-xs">!</span>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white font-medium text-sm">Uyarı: Optimize edilmemiş görseller</p>
+                              <p className="text-gray-400 text-xs mt-1">8 görsel boyut optimizasyonu gerekiyor (toplam 2.4 MB)</p>
+                            </div>
+                            <Badge className="bg-yellow-500/20 text-yellow-400">Orta</Badge>
+                          </div>
+
+                          <div className="flex items-start gap-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                            <div className="w-6 h-6 bg-blue-500/20 rounded flex items-center justify-center shrink-0 mt-0.5">
+                              <span className="text-blue-400 text-xs">i</span>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white font-medium text-sm">Bilgi: Alt tag eksiklikleri</p>
+                              <p className="text-gray-400 text-xs mt-1">5 görselde alt attribute bulunmuyor</p>
+                            </div>
+                            <Badge className="bg-blue-500/20 text-blue-400">Düşük</Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* Team Collaboration View */}
+                {activeDashboardView === 'team' && (
+                  <div className="space-y-6">
+                    {/* Team Activity */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <Card className="bg-gray-800/50 border border-gray-700">
+                        <CardContent className="p-6">
+                          <h3 className="text-white font-medium mb-4">Ekip Aktivitesi</h3>
+                          <div className="space-y-4">
+                            <div className="flex items-start gap-3">
+                              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
+                                AY
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-white text-sm font-medium">Ayşe Yılmaz</p>
+                                <p className="text-gray-400 text-xs">Meta kampanyası için bütçe artışı önerdi</p>
+                                <p className="text-gray-500 text-xs mt-1">5 dakika önce</p>
+                              </div>
+                              <Badge className="bg-green-500/20 text-green-400">Onaylandı</Badge>
+                            </div>
+
+                            <div className="flex items-start gap-3">
+                              <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
+                                MK
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-white text-sm font-medium">Mehmet Kaya</p>
+                                <p className="text-gray-400 text-xs">Q1 raporunu paylaştı</p>
+                                <p className="text-gray-500 text-xs mt-1">2 saat önce</p>
+                              </div>
+                              <Badge className="bg-blue-500/20 text-blue-400">Yeni</Badge>
+                            </div>
+
+                            <div className="flex items-start gap-3">
+                              <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
+                                ZA
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-white text-sm font-medium">Zeynep Arslan</p>
+                                <p className="text-gray-400 text-xs">TikTok kampanyasına yorum yaptı</p>
+                                <p className="text-gray-500 text-xs mt-1">1 gün önce</p>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-gray-800/50 border border-gray-700">
+                        <CardContent className="p-6">
+                          <h3 className="text-white font-medium mb-4">Bekleyen Onaylar</h3>
                           <div className="space-y-3">
-                            <div>
-                              <p className="text-gray-400 text-sm">Harcama</p>
-                              <p className="text-white text-xl font-medium">₺98,650</p>
+                            <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                              <div className="flex items-start justify-between mb-2">
+                                <p className="text-white font-medium text-sm">Bütçe Artış Talebi</p>
+                                <Badge className="bg-yellow-500/20 text-yellow-400">Bekliyor</Badge>
+                              </div>
+                              <p className="text-gray-400 text-xs mb-3">Google Ads için ₺50,000 ek bütçe</p>
+                              <div className="flex gap-2">
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white text-xs flex-1">
+                                  Onayla
+                                </Button>
+                                <Button size="sm" variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-700 text-xs flex-1">
+                                  Reddet
+                                </Button>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">ROAS</p>
-                              <p className="text-white text-xl font-medium">5.2x</p>
-                            </div>
-                            <div>
-                              <p className="text-gray-400 text-sm">Dönüşüm</p>
-                              <p className="text-white text-xl font-medium">2,840</p>
+
+                            <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                              <div className="flex items-start justify-between mb-2">
+                                <p className="text-white font-medium text-sm">Kampanya Durdurma</p>
+                                <Badge className="bg-yellow-500/20 text-yellow-400">Bekliyor</Badge>
+                              </div>
+                              <p className="text-gray-400 text-xs mb-3">Düşük performanslı 3 kampanya için</p>
+                              <div className="flex gap-2">
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white text-xs flex-1">
+                                  Onayla
+                                </Button>
+                                <Button size="sm" variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-700 text-xs flex-1">
+                                  İncele
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </CardContent>
                       </Card>
                     </div>
+
+                    {/* Team Members */}
+                    <Card className="bg-gray-800/50 border border-gray-700">
+                      <CardContent className="p-6">
+                        <h3 className="text-white font-medium mb-4">Ekip Üyeleri</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="flex items-center gap-3 p-3 bg-gray-900/50 border border-gray-700 rounded-lg">
+                            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-medium">
+                              AY
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white text-sm font-medium">Ayşe Yılmaz</p>
+                              <p className="text-gray-400 text-xs">Marketing Manager</p>
+                            </div>
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          </div>
+
+                          <div className="flex items-center gap-3 p-3 bg-gray-900/50 border border-gray-700 rounded-lg">
+                            <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center text-white font-medium">
+                              MK
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white text-sm font-medium">Mehmet Kaya</p>
+                              <p className="text-gray-400 text-xs">Data Analyst</p>
+                            </div>
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          </div>
+
+                          <div className="flex items-center gap-3 p-3 bg-gray-900/50 border border-gray-700 rounded-lg">
+                            <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white font-medium">
+                              ZA
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-white text-sm font-medium">Zeynep Arslan</p>
+                              <p className="text-gray-400 text-xs">Creative Director</p>
+                            </div>
+                            <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
               </CardContent>
@@ -654,64 +941,99 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-light text-white mb-4">
-              Pazarlama Kararlarınızı AI ile Otomatize Edin
+              Sadece Rapor Değil, <span className="bg-gradient-to-r from-blue-800 to-blue-950 bg-clip-text text-transparent font-semibold">Aksiyon</span>
             </h2>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              Veri analizinden eylem planına kadar tüm pazarlama süreçlerinizi akıllı asistanımızla yönetin.
+            <p className="text-xl font-light text-gray-400 max-w-3xl mx-auto">
+              Günde saatler harcadığınız analiz, rapor ve optimizasyon işlerini IQsion sizin için yapar. Siz sadece takip edin ve kontrol edin, operasyonu O'na bırakın.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {[
               {
-                icon: Database,
-                title: "Otomatik Veri Entegrasyonu",
-                description: "Shopify, Meta, Google Ads, TikTok verilerinizi tek tıkla bağlayın. Manuel veri girişine son verin.",
-                features: ["Real-time veri senkronizasyonu", "Güvenli API bağlantıları"]
-              },
-              {
                 icon: Brain,
-                title: "Yapay Zeka Analizi", 
-                description: "Gelişmiş AI algoritmaları ile pazarlama performansınızı analiz edin ve gelecek trendleri öngörün.",
-                features: ["Tahmine dayalı analitik", "Anomali tespit sistemi"]
+                title: "AI Karar Mekanizması & Otomatik Aksiyonlar",
+                description: "Günlerce süren kampanya analiz ve optimizasyon işini 5 dakikaya indirin. Gemini AI analiz eder, önerir, siz sadece onaylayın.",
+                features: [
+                  "Tek tıkla kampanya optimizasyonu",
+                  "Ekip üyelerine aksiyon ataması",
+                  "Otomatik budget reallocations"
+                ]
               },
               {
-                icon: Lightbulb,
-                title: "Akıllı Öneriler",
-                description: "AI asistanınız size hangi reklamları durdurmanız, hangi ürünleri öne çıkarmanız gerektiğini söyler.",
-                features: ["Tek tıkla uygulama", "ROI odaklı öneriler"]
+                icon: TrendingUp,
+                title: "MMM & Forecasting",
+                description: "Haftalık süren karmaşık bütçe planlamasını otomatikleştirin. 30-90 günlük satış tahminleri ve kâr odaklı bütçe dağılımı saniyeler içinde hazır.",
+                features: [
+                  "30-90 günlük satış projeksiyonları",
+                  "Kanal bazlı katkı analizi",
+                  "Profit-focused budget allocation"
+                ]
+              },
+              {
+                icon: Bell,
+                title: "Akıllı Anomali Tespit & Monitoring",
+                description: "Manuel takipten kurtulun, sorunları siz fark etmeden önce uyarı alın. 7/24 otomatik izleme ile günde saatler kazanın.",
+                features: [
+                  "7/24 otomatik izleme",
+                  "Proaktif uyarılar (Slack, email, SMS)",
+                  "Site performans ve SEO monitoring"
+                ]
+              },
+              {
+                icon: CircleDollarSign,
+                title: "Karlılık Odaklı Attribution",
+                description: "Excel'de günlerce süren kârlılık analizini otomatikleştirin. Gerçek ROI'nizi anında görün, hangi kanallara yatırım yapacağınıza hızla karar verin.",
+                features: [
+                  "Profit-first attribution modeling",
+                  "Multi-touch customer journey tracking",
+                  "Gerçek ROI hesaplama (ürün maliyetleri dahil)"
+                ]
+              },
+              {
+                icon: LineChart,
+                title: "Yönetici Dashboard'ları",
+                description: "Haftalık rapor hazırlama ritüelini bitirin. Executive summary otomatik oluşturulur, e-posta ile gönderilir. Siz toplantılara hazır girin.",
+                features: [
+                  "Executive summary views",
+                  "Otomatik haftalık/aylık raporlama",
+                  "Key metrics tracking (CAC, LTV, ROAS, Profit)"
+                ]
               },
               {
                 icon: Zap,
-                title: "Otomatik Eylemler",
-                description: "Kârınızı korumak için otomatik budget ayarlamaları ve reklam optimizasyonları yapın.",
-                features: ["Budget koruma sistemi", "Performance monitöring"]
-              },
-              {
-                icon: Map,
-                title: "Müşteri Yolculuğu",
-                description: "Her müşterinin ilk reklamdan satın almaya kadar olan tüm yolculuğunu görselleştirin.",
-                features: ["Touchpoint analizi", "Attribution modeling"]
-              },
-              {
-                icon: BarChart3,
-                title: "Akıllı Raporlama",
-                description: "Özelleştirilebilir dashboard'lar ve otomatik raporlarla performansınızı takip edin.",
-                features: ["Özelleştirilebilir widget'lar", "Otomatik e-posta raporları"]
+                title: "Custom Workflow Builder",
+                description: "IT ekibine bağımlı kalmayın, kendi otomasyon kurallarınızı dakikalar içinde kurun. No-code builder ile onay zincirleri, uyarılar ve aksiyonları sürükle-bırak.",
+                features: [
+                  "No-code workflow builder",
+                  "Özelleştirilebilir onay zincirleri",
+                  "Custom trigger & action rules"
+                ]
               }
             ].map((feature, index) => (
-              <Card key={index} className="bg-gray-800 border border-gray-700">
+              <Card key={index} className="bg-gray-900 border border-gray-800 hover:border-gray-700 transition-all duration-300 group">
                 <CardContent className="p-8">
-                  <div className="w-16 h-16 bg-gray-700/50 rounded-2xl flex items-center justify-center mb-6">
-                    <feature.icon className="w-8 h-8 text-gray-300" />
+                  <div className="mb-6">
+                    <feature.icon className="w-9 h-9 stroke-[1.5]" style={{
+                      stroke: 'url(#iconGradient' + index + ')',
+                      fill: 'none'
+                    }} />
+                    <svg width="0" height="0" style={{ position: 'absolute' }}>
+                      <defs>
+                        <linearGradient id={'iconGradient' + index} x1="0%" y1="0%" x2="100%" y2="100%">
+                          <stop offset="0%" style={{ stopColor: '#3b82f6', stopOpacity: 1 }} />
+                          <stop offset="100%" style={{ stopColor: '#1d4ed8', stopOpacity: 1 }} />
+                        </linearGradient>
+                      </defs>
+                    </svg>
                   </div>
-                  <h3 className="text-xl font-normal text-white mb-4">{feature.title}</h3>
-                  <p className="text-gray-300 mb-6">{feature.description}</p>
-                  <ul className="text-sm text-gray-400 space-y-2">
+                  <h3 className="text-xl font-medium text-white mb-3">{feature.title}</h3>
+                  <p className="text-sm font-light text-gray-400 mb-6 leading-relaxed">{feature.description}</p>
+                  <ul className="text-sm text-gray-500 space-y-2">
                     {feature.features.map((item, idx) => (
-                      <li key={idx} className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-400" />
-                        {item}
+                      <li key={idx} className="flex items-start gap-2">
+                        <ChevronRight className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" strokeWidth={2.5} />
+                        <span>{item}</span>
                       </li>
                     ))}
                   </ul>
@@ -886,16 +1208,16 @@ export default function Landing() {
                     <span className="text-gray-300">E-posta desteği</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gray-700 hover:bg-gray-600 text-white transition-colors shadow-sm">
+                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all shadow-sm rounded-xl font-medium">
                   Başla
                 </Button>
               </CardContent>
             </Card>
 
             {/* Pro Plan */}
-            <Card className="bg-gray-800 border-2 border-gray-600 relative">
+            <Card className="bg-gray-800 border-2 border-blue-800 relative">
               <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                <Badge className="bg-gray-700 text-white px-4 py-2">En Popüler</Badge>
+                <Badge className="bg-gradient-to-r from-blue-800 to-blue-950 text-white px-4 py-2">En Popüler</Badge>
               </div>
               <CardContent className="p-8">
                 <h3 className="text-xl font-normal text-white mb-2">Profesyonel</h3>
@@ -926,7 +1248,7 @@ export default function Landing() {
                     <span className="text-gray-300">Öncelikli destek</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gray-700 hover:bg-gray-600 text-white transition-colors shadow-sm">
+                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all shadow-sm rounded-xl font-medium">
                   Başla
                 </Button>
               </CardContent>
@@ -963,7 +1285,7 @@ export default function Landing() {
                     <span className="text-gray-300">Özel hesap yöneticisi</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gray-700 hover:bg-gray-600 text-white transition-colors shadow-sm">
+                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all shadow-sm rounded-xl font-medium">
                   İletişime Geç
                 </Button>
               </CardContent>
@@ -1171,7 +1493,7 @@ export default function Landing() {
                   placeholder="E-posta adresiniz"
                   className="flex-1 px-6 py-4 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder:text-gray-500 focus:outline-none focus:border-gray-600 h-14"
                 />
-                <Button className="bg-white text-gray-900 px-8 rounded-xl font-medium hover:bg-gray-100 transition-colors whitespace-nowrap h-14">
+                <Button className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white px-8 rounded-xl font-medium transition-all whitespace-nowrap h-14">
                   Abone Ol
                 </Button>
               </div>
@@ -1197,7 +1519,7 @@ export default function Landing() {
             <Button 
               size="lg"
               onClick={() => (window.location.href = `${appBase}/auth`)}
-              className="bg-white text-gray-900 px-8 py-4 rounded-xl font-medium text-lg hover:bg-gray-100 shadow-sm transition-colors"
+              className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white px-8 py-4 rounded-xl font-medium text-lg shadow-sm transition-all"
             >
               {t('tryFree')}
               <ArrowRight className="w-5 h-5 ml-2" />
@@ -1205,7 +1527,7 @@ export default function Landing() {
             <Button 
               size="lg"
               variant="ghost"
-              className="bg-gray-800 text-white px-8 py-4 rounded-xl font-medium text-lg hover:bg-gray-700 shadow-sm transition-colors"
+              className="border-2 border-blue-800 text-blue-300 hover:bg-gradient-to-r hover:from-blue-800 hover:to-blue-950 hover:text-white px-8 py-4 rounded-xl font-medium text-lg shadow-sm transition-all"
             >
               <Calendar className="w-5 h-5 mr-2" />
               {t('requestDemo')}
@@ -1570,7 +1892,7 @@ export default function Landing() {
       <div className="fixed bottom-6 right-6 z-50">
         <Button
           onClick={() => setIsChatOpen(!isChatOpen)}
-          className="bg-gray-700 hover:bg-gray-600 text-white rounded-full p-4 shadow-lg transition-colors"
+          className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white rounded-full p-4 shadow-lg transition-all"
         >
           <MessageCircle className="w-6 h-6" />
         </Button>

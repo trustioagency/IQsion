@@ -17,7 +17,7 @@ export const translations = {
     // Hero
     heroTitle: "E-ticaret İşletmeniz İçin",
     heroSubtitle: "AI Destekli Büyüme Ortağı",
-    heroDescription: "Tüm pazarlama verilerinizi IQsion'da birleştirin. Pazarlama kararlarınızı yüzeysel raporlardan değil, kârlılığınıza odaklanan derin algoritmalardan alın, işlerinizi otomatize edin.",
+    heroDescription: "Pazarlama verilerinizi birleştirin, kârlılık odaklı algoritmalarla karar alın ve işlerinizi otomatize edin.",
   watchDemo: "Demo Talep Et",
   tryFree: "Ücretsiz Dene",
   references: "Referanslar",
@@ -255,7 +255,7 @@ export const translations = {
     // Hero
     heroTitle: "For Your E-commerce Business",
     heroSubtitle: "AI-Powered Growth Partner",
-    heroDescription: "Unify your Shopify, Meta, Google and TikTok data in one platform. Automate your marketing decisions with AI and boost your profitability.",
+    heroDescription: "Unify your marketing data, make profit-focused decisions with AI algorithms, and automate your operations.",
   watchDemo: "Request Demo",
   tryFree: "Try Free",
   references: "References",
