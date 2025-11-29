@@ -421,7 +421,7 @@ export default function Landing() {
           </div>
 
           {/* Dashboard View Tabs */}
-          <div className="flex justify-center gap-3 mb-8 flex-wrap">
+          <div className="flex justify-center gap-2 sm:gap-3 mb-8 flex-wrap px-2">
             <button 
               onClick={() => setActiveDashboardView('overview')}
               className={`px-6 py-2.5 rounded-xl border font-medium transition-colors text-sm ${
@@ -484,15 +484,15 @@ export default function Landing() {
                 </div>
               </CardHeader>
 
-              <CardContent className="p-8">
+              <CardContent className="p-4 sm:p-6 lg:p-8">
                 {/* Overview View */}
                 {activeDashboardView === 'overview' && (
                   <>
                 {/* Date Filter & Data Sources */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-gray-400 text-xs">{t('dashboardDataSources')}</span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {/* Google Ads */}
                       <div className="w-6 h-6 bg-gray-800 rounded border border-gray-700 flex items-center justify-center" title="Google Ads">
                         <svg className="w-3 h-3" viewBox="0 0 24 24">
@@ -535,11 +535,11 @@ export default function Landing() {
                   </div>
                 </div>
 
-                <div className="flex gap-6">
+                <div className="flex flex-col lg:flex-row gap-6">
                   {/* Left: KPI Cards + AI Insights */}
                   <div className="flex-1 space-y-6">
                     {/* KPI Cards Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {[
                         { icon: TrendingUp, label: t('dashboardTotalRevenue'), value: '₺3,156,750', change: '+12.5%', color: 'green', trend: [65, 68, 72, 70, 75, 78, 82, 80, 85, 88, 92, 90, 95, 100], isPositive: true },
                         { icon: BarChart3, label: t('dashboardAdSpend'), value: '₺542,350', change: '+8.2%', color: 'orange', trend: [60, 62, 65, 68, 70, 72, 75, 78, 80, 82, 85, 88, 90, 92], isPositive: false },
@@ -710,7 +710,7 @@ export default function Landing() {
                   </div>
 
                   {/* Right: Today's Insight + IQsion AI Chat */}
-                  <div className="w-80 space-y-6">
+                  <div className="w-full lg:w-80 space-y-6">
                     {/* Today's Insight */}
                     <Card className="bg-gradient-to-br from-blue-900/30 to-purple-900/30 border border-blue-800/50">
                       <CardContent className="p-5">
@@ -786,7 +786,7 @@ export default function Landing() {
 
                 {/* AI Insights View */}
                 {activeDashboardView === 'ai' && (
-                  <div className="flex gap-6">
+                  <div className="flex flex-col lg:flex-row gap-6">
                     {/* Left: AI Insights List */}
                     <div className="flex-1 space-y-3">
                       {/* Reklam - Bütçe Optimizasyonu */}
@@ -1030,7 +1030,7 @@ export default function Landing() {
 
                 {/* Technical Audit View */}
                 {activeDashboardView === 'audit' && (
-                  <div className="flex gap-6">
+                  <div className="flex flex-col lg:flex-row gap-6">
                     {/* Left: Audit Categories & Details */}
                     <div className="flex-1 space-y-6">
                       {/* Overall Score */}
@@ -1082,7 +1082,7 @@ export default function Landing() {
                       </Card>
 
                       {/* Category Scores */}
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {[
                           { label: t('dashboardAuditCategorySEO'), score: 87, color: 'green', icon: '🔍', issues: 5 },
                           { label: t('dashboardAuditCategoryPerformance'), score: 72, color: 'yellow', icon: '⚡', issues: 8 },
@@ -1258,7 +1258,7 @@ export default function Landing() {
                     </div>
 
                     {/* Right: Quick Actions & Summary */}
-                    <div className="w-80 space-y-6">
+                    <div className="w-full lg:w-80 space-y-6">
                       {/* Quick Fix Actions */}
                       <Card className="bg-gradient-to-br from-green-900/30 to-emerald-900/30 border border-green-800/50">
                         <CardContent className="p-5">
@@ -1380,11 +1380,11 @@ export default function Landing() {
 
                 {/* Team Collaboration View */}
                 {activeDashboardView === 'team' && (
-                  <div className="flex gap-6">
+                  <div className="flex flex-col lg:flex-row gap-6">
                     {/* Left: Activity & Approvals */}
                     <div className="flex-1 space-y-6">
                       {/* Team Stats Overview */}
-                      <div className="grid grid-cols-4 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <Card className="bg-gray-900/50 border border-gray-700/50">
                           <CardContent className="p-4">
                             <div className="flex items-center gap-2 mb-2">
@@ -1628,7 +1628,7 @@ export default function Landing() {
                     </div>
 
                     {/* Right: Team Members & Performance */}
-                    <div className="w-80 space-y-6">
+                    <div className="w-full lg:w-80 space-y-6">
                       {/* Team Members */}
                       <Card className="bg-gray-900/50 border border-gray-700/50">
                         <CardContent className="p-5">
