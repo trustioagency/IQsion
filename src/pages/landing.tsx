@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import ContactFormModal from "../components/ContactFormModal";
 import {
   TrendingUp,
   Database,
@@ -93,12 +94,17 @@ export default function Landing() {
     return host !== 'app.iqsion.com' ? 'https://app.iqsion.com' : '';
   })();
 
+  const [contactModal, setContactModal] = useState<{ open: boolean; type: 'demo' | 'contact' }>({
+    open: false,
+    type: 'contact'
+  });
+
   const handleLogin = () => {
     window.location.href = `${appBase}/auth`;
   };
 
   const handleStartTrial = () => {
-    window.location.href = `${appBase}/api/login`;
+    window.location.href = '/auth';
   };
 
   const handleSendMessage = () => {
@@ -132,7 +138,7 @@ export default function Landing() {
               <a href="#dashboard" className="text-gray-300 hover:text-white transition-colors font-normal px-4 py-2 rounded-lg hover:bg-gray-800/50">{t('dashboard')}</a>
               <a href="#pricing" className="text-gray-300 hover:text-white transition-colors font-normal px-4 py-2 rounded-lg hover:bg-gray-800/50">{language === 'tr' ? 'Fiyatlandırma' : 'Pricing'}</a>
               <a href="#testimonials" className="text-gray-300 hover:text-white transition-colors font-normal px-4 py-2 rounded-lg hover:bg-gray-800/50">{t('testimonials')}</a>
-              <a href="#contact" className="text-gray-300 hover:text-white transition-colors font-normal px-4 py-2 rounded-lg hover:bg-gray-800/50">{t('contact')}</a>
+              <button onClick={() => setContactModal({ open: true, type: 'contact' })} className="text-gray-300 hover:text-white transition-colors font-normal px-4 py-2 rounded-lg hover:bg-gray-800/50">{t('contact')}</button>
             </nav>
             {/* Actions */}
             <div className="flex items-center gap-5 ml-auto shrink-0">
@@ -184,6 +190,7 @@ export default function Landing() {
               <Button 
                 size="lg" 
                 variant="ghost"
+                onClick={() => setContactModal({ open: true, type: 'demo' })}
                 className="border-2 border-blue-800 text-white hover:bg-gradient-to-r hover:from-blue-800 hover:to-blue-950 hover:text-white px-8 py-4 rounded-xl font-light text-base shadow-md transition-all"
               >
                 <Play className="w-4 h-4 mr-2" />
@@ -2062,7 +2069,10 @@ export default function Landing() {
                     <span className="text-gray-400 text-sm">{t('pricingFeature7DaysHistory')}</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all">
+                <Button 
+                  className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all"
+                  onClick={() => setContactModal({ open: true, type: 'contact' })}
+                >
                   {t('pricingContactUs')}
                 </Button>
               </CardContent>
@@ -2101,7 +2111,10 @@ export default function Landing() {
                     <span className="text-gray-400 text-sm">{t('pricingFeatureBasicCompetitor')}</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all">
+                <Button 
+                  className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all"
+                  onClick={() => setContactModal({ open: true, type: 'contact' })}
+                >
                   {t('pricingContactUs')}
                 </Button>
               </CardContent>
@@ -2149,7 +2162,10 @@ export default function Landing() {
                     <span className="text-gray-300 text-sm">{t('pricingFeatureDetailedCompetitor')}</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all">
+                <Button 
+                  className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all"
+                  onClick={() => setContactModal({ open: true, type: 'contact' })}
+                >
                   {t('pricingContactUs')}
                 </Button>
               </CardContent>
@@ -2196,7 +2212,10 @@ export default function Landing() {
                     <span className="text-gray-400 text-sm">{t('pricingFeatureCustomTraining')}</span>
                   </li>
                 </ul>
-                <Button className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all">
+                <Button 
+                  className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white transition-all"
+                  onClick={() => setContactModal({ open: true, type: 'contact' })}
+                >
                   {t('pricingContactUs')}
                 </Button>
               </CardContent>
@@ -2600,7 +2619,7 @@ export default function Landing() {
           <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
             <Button 
               size="lg"
-              onClick={() => (window.location.href = `${appBase}/auth`)}
+              onClick={() => (window.location.href = '/auth')}
               className="bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white px-12 py-6 rounded-xl font-medium text-lg transition-all"
             >
               {t('ctaTryFree')}
@@ -2608,6 +2627,7 @@ export default function Landing() {
             </Button>
             <Button 
               size="lg"
+              onClick={() => setContactModal({ open: true, type: 'demo' })}
               className="bg-transparent border-2 border-blue-800 hover:border-blue-700 text-white hover:text-gray-100 px-12 py-6 rounded-xl font-medium text-lg transition-all"
             >
               {t('ctaRequestDemo')}
@@ -3069,6 +3089,13 @@ export default function Landing() {
         )}
 
       </div>
+
+      {/* Contact Form Modal */}
+      <ContactFormModal 
+        open={contactModal.open}
+        onOpenChange={(open) => setContactModal(prev => ({ ...prev, open }))}
+        type={contactModal.type}
+      />
     </div>
   );
 }

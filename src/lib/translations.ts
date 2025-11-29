@@ -702,6 +702,21 @@ export const translations = {
   scImpressionsCol: "Gösterimler",
   ctrShort: "CTR",
   scPositionCol: "Pozisyon",
+
+  // Contact Form Modal
+  contactFormDemoTitle: "Demo Talep Edin",
+  contactFormContactTitle: "Bize Ulaşın",
+  contactFormDemoDescription: "Size özel bir demo sunumu için bilgilerinizi bırakın. En kısa sürede size ulaşalım.",
+  contactFormContactDescription: "Sorularınız mı var? Size yardımcı olmaktan mutluluk duyarız.",
+  contactFormName: "Adınız",
+  contactFormEmail: "E-posta Adresiniz",
+  contactFormCompany: "Şirket",
+  contactFormPhone: "Telefon",
+  contactFormMessage: "Mesajınız",
+  contactFormMessagePlaceholder: "Bize nasıl yardımcı olabiliriz?",
+  contactFormSubmit: "Gönder",
+  contactFormSending: "Gönderiliyor...",
+  contactFormSuccess: "Başarıyla gönderildi!",
   },
   en: {
     // Header
@@ -1388,6 +1403,21 @@ export const translations = {
   scImpressionsCol: "Impressions",
   ctrShort: "CTR",
   scPositionCol: "Position",
+
+  // Contact Form Modal
+  contactFormDemoTitle: "Request a Demo",
+  contactFormContactTitle: "Contact Us",
+  contactFormDemoDescription: "Leave your information for a personalized demo. We'll reach out to you soon.",
+  contactFormContactDescription: "Have questions? We'd love to help you.",
+  contactFormName: "Your Name",
+  contactFormEmail: "Your Email",
+  contactFormCompany: "Company",
+  contactFormPhone: "Phone",
+  contactFormMessage: "Your Message",
+  contactFormMessagePlaceholder: "How can we help you?",
+  contactFormSubmit: "Submit",
+  contactFormSending: "Sending...",
+  contactFormSuccess: "Successfully sent!",
   // Pie selectors
   revenueVsAdSpend: "Revenue vs Ad Spend",
   ordersVsClicks: "Orders vs Clicks",
