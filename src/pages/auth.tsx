@@ -124,7 +124,7 @@ export default function Auth() {
       <div className="w-full max-w-md relative z-10">
         {/* Logo & Brand */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
+          <a href="/" className="flex items-center justify-center gap-3 mb-4 hover:opacity-80 transition-opacity cursor-pointer">
             <img 
               src="/iqsion.logo.png" 
               alt="IQsion" 
@@ -133,7 +133,7 @@ export default function Auth() {
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 bg-clip-text text-transparent">
               IQsion
             </h1>
-          </div>
+          </a>
           <p className="text-gray-400 text-sm">AI-Powered Marketing Intelligence Platform</p>
         </div>
 
@@ -309,7 +309,7 @@ export default function Auth() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-gray-500 text-xs">
-            © 2024 IQsion. All rights reserved.
+            © 2025 IQsion. All rights reserved.
           </p>
         </div>
       </div>
