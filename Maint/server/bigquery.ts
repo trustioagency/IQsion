@@ -88,29 +88,71 @@ export type MetricsRow = {
 };
 
 export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: number }>{
+  if (!rows.length) return { inserted: 0 };
+  
+  const bq = getBigQuery();
   const { table } = await ensureDatasetAndTable();
-  // Add createdAt if missing
+  
+  // WORKAROUND: Streaming insert yerine batch DML INSERT kullan
+  // MERGE UPDATE yapınca streaming buffer'a takılıyor, sadece INSERT ile devam
+  // Dashboard tarafında MAX(createdAt) ile en yeni satırları alacağız
   const payload = rows.map(r => ({
     ...r,
     createdAt: r.createdAt || new Date().toISOString(),
   }));
-  await table.insert(payload, { raw: false, ignoreUnknownValues: true, skipInvalidRows: true });
+
+  // Batch INSERT query
+  const values = payload.map(r => {
+    const userId = String(r.userId || '').replace(/'/g, "\\'");
+    const source = String(r.source || '').replace(/'/g, "\\'");
+    const date = String(r.date || '1970-01-01');
+    const campaignId = r.campaignId ? `'${String(r.campaignId).replace(/'/g, "\\'")}'` : 'NULL';
+    const adGroupId = r.adGroupId ? `'${String(r.adGroupId).replace(/'/g, "\\'")}'` : 'NULL';
+    const impressions = r.impressions ?? 'NULL';
+    const clicks = r.clicks ?? 'NULL';
+    const costMicros = r.costMicros ?? 'NULL';
+    const sessions = r.sessions ?? 'NULL';
+    const transactions = r.transactions ?? 'NULL';
+    const revenueMicros = r.revenueMicros ?? 'NULL';
+    const createdAt = `TIMESTAMP('${r.createdAt}')`;
+    return `('${userId}', '${source}', DATE('${date}'), ${campaignId}, ${adGroupId}, ${impressions}, ${clicks}, ${costMicros}, ${sessions}, ${transactions}, ${revenueMicros}, ${createdAt})`;
+  }).join(',\n      ');
+
+  const insertSql = `
+    INSERT INTO \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
+    (userId, source, date, campaignId, adGroupId, impressions, clicks, costMicros, sessions, transactions, revenueMicros, createdAt)
+    VALUES ${values}
+  `;
+
+  const [job] = await bq.createQueryJob({
+    query: insertSql,
+    location: BQ_LOCATION,
+  });
+  await job.getQueryResults();
+
   return { inserted: payload.length };
 }
 
 export async function queryByUserAndRange(userId: string, from: string, to: string) {
   const bq = getBigQuery();
+  // Duplicate'leri önlemek için her (userId,source,date) için MAX(createdAt) olan satırları seç
   const sql = `
-    SELECT source,
-           SUM(CAST(costMicros AS INT64)) AS costMicros,
-           SUM(CAST(revenueMicros AS INT64)) AS revenueMicros,
-           SUM(CAST(clicks AS INT64)) AS clicks,
-           SUM(CAST(impressions AS INT64)) AS impressions,
-           SUM(CAST(sessions AS INT64)) AS sessions,
-           SUM(CAST(transactions AS INT64)) AS transactions
-    FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
-    WHERE userId = @userId AND date BETWEEN @from AND @to
-    GROUP BY source
+    WITH latest AS (
+      SELECT userId, source, date, MAX(createdAt) as maxCreated
+      FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
+      WHERE userId = @userId AND date BETWEEN @from AND @to
+      GROUP BY userId, source, date
+    )
+    SELECT m.source,
+           SUM(CAST(m.costMicros AS INT64)) AS costMicros,
+           SUM(CAST(m.revenueMicros AS INT64)) AS revenueMicros,
+           SUM(CAST(m.clicks AS INT64)) AS clicks,
+           SUM(CAST(m.impressions AS INT64)) AS impressions,
+           SUM(CAST(m.sessions AS INT64)) AS sessions,
+           SUM(CAST(m.transactions AS INT64)) AS transactions
+    FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\` m
+    INNER JOIN latest l ON m.userId=l.userId AND m.source=l.source AND m.date=l.date AND m.createdAt=l.maxCreated
+    GROUP BY m.source
     ORDER BY revenueMicros DESC
   `;
   const options: Query = {
@@ -133,6 +175,23 @@ export async function applyRetentionForUser(userId: string, retentionDays: numbe
   const options: Query = {
     query: sql,
     params: { userId, days: retentionDays },
+    location: BQ_LOCATION,
+  };
+  const [job] = await bq.createQueryJob(options);
+  await job.getQueryResults();
+  return { ok: true };
+}
+
+export async function applyRetentionForUserAndSource(userId: string, source: string, retentionDays: number) {
+  const bq = getBigQuery();
+  const sql = `
+    DELETE FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
+    WHERE userId = @userId AND source = @source
+      AND date < DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+  `;
+  const options: Query = {
+    query: sql,
+    params: { userId, source, days: retentionDays },
     location: BQ_LOCATION,
   };
   const [job] = await bq.createQueryJob(options);

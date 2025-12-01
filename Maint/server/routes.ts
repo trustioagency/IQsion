@@ -6,7 +6,7 @@ import fs from "fs";
 import admin from "./firebase";
 import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
-import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
+import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, applyRetentionForUserAndSource, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
 // Basit fetch timeout helper
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -37,6 +37,28 @@ function buildAppBase(req: express.Request) {
   // In prod, force https and strip any port
   return `${xfProto || 'https'}://${host.replace(/:.*/, '')}`;
 }
+function buildApiBase(req: express.Request) {
+  const envApi = (process.env.API_URL || '').trim().replace(/\/$/, '');
+  if (envApi) return envApi;
+  const proto = ((req.headers['x-forwarded-proto'] as string) || req.protocol || 'https').trim();
+  const host = ((req.headers['x-forwarded-host'] as string) || req.get('host') || 'localhost:5001').trim();
+  return `${proto}://${host}`.replace(/\/$/, '');
+}
+
+function normalizeBqDate(val: any): string {
+  if (!val) return '';
+  if (typeof val === 'string') return val.slice(0, 10);
+  if (typeof val === 'object') {
+    const valueField = (val as any).value;
+    if (typeof valueField === 'string') return valueField.slice(0, 10);
+    if (typeof valueField === 'number') return String(valueField).slice(0, 10);
+    if (typeof (val as any).toISOString === 'function') {
+      return (val as any).toISOString().slice(0, 10);
+    }
+  }
+  return String(val).slice(0, 10);
+}
+
 function settingsRedirect(res: express.Response, req: express.Request, platform: string, ok: boolean) {
   const base = buildAppBase(req);
   const status = ok ? 'success' : 'error';
@@ -588,8 +610,8 @@ router.get('/api/attribution/sources', async (req, res) => {
       try {
         const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
         const [metaRes, gadsRes] = await Promise.allSettled([
-          fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
-          fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+          fetchWithTimeout(`${baseUrl}/api/meta/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+          fetchWithTimeout(`${baseUrl}/api/googleads/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
         ]);
         const extractSpend = async (r: any) => {
           if (r.status !== 'fulfilled') return 0;
@@ -1100,8 +1122,8 @@ router.get('/api/customers/metrics', async (req, res) => {
       const baseUrl = `${baseProto}://${host}`;
       const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(since)}&endDate=${encodeURIComponent(until)}`;
       const [metaRes, gadsRes] = await Promise.allSettled([
-        fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
-        fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/meta/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/googleads/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
       ]);
       const getSpend = async (r: any) => {
         if (r.status !== 'fulfilled') return 0;
@@ -1275,7 +1297,7 @@ router.get('/api/shopify/summary-bq', async (req, res) => {
              SUM(CAST(transactions AS INT64)) AS orders,
              SUM(CAST(revenueMicros AS INT64)) AS revenueMicros
       FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-      WHERE userId = @userId AND source = 'shopify' AND date BETWEEN @start AND @end
+      WHERE userId = @userId AND source = 'shopify' AND date BETWEEN DATE(@start) AND DATE(@end)
       GROUP BY date
       ORDER BY date
     `;
@@ -1288,7 +1310,7 @@ router.get('/api/shopify/summary-bq', async (req, res) => {
 
     const map: Record<string, { orders: number; revenue: number }> = {};
     for (const r of rows as any[]) {
-      const d = String(r.date);
+      const d = normalizeBqDate(r.date);
       const orders = Number(r.orders || 0);
       const revenue = Number(r.revenueMicros || 0) / 1_000_000;
       map[d] = { orders, revenue };
@@ -1481,8 +1503,8 @@ router.get('/api/profitability/summary', async (req, res) => {
       const baseUrl = `${baseProto}://${host}`;
       const qs = `userId=${encodeURIComponent(userId)}&startDate=${encodeURIComponent(since)}&endDate=${encodeURIComponent(until)}`;
       const [metaRes, gadsRes] = await Promise.allSettled([
-        fetchWithTimeout(`${baseUrl}/api/meta/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
-        fetchWithTimeout(`${baseUrl}/api/googleads/summary?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/meta/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
+        fetchWithTimeout(`${baseUrl}/api/googleads/summary-bq?${qs}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } }, 15000),
       ]);
       const getSpend = async (r: any) => {
         if (r.status !== 'fulfilled') return 0;
@@ -1956,7 +1978,7 @@ router.get('/api/googleads/summary-bq', async (req, res) => {
              SUM(CAST(costMicros AS INT64)) AS costMicros,
              SUM(CAST(transactions AS INT64)) AS conversions
       FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-      WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN @start AND @end
+      WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
       GROUP BY date
       ORDER BY date
     `;
@@ -1969,7 +1991,7 @@ router.get('/api/googleads/summary-bq', async (req, res) => {
 
     const map: Record<string, { impressions: number; clicks: number; spend: number; conversions: number; }> = {};
     for (const r of rows as any[]) {
-      const d = String(r.date);
+      const d = normalizeBqDate(r.date);
       map[d] = {
         impressions: Number(r.impressions || 0),
         clicks: Number(r.clicks || 0),
@@ -2111,12 +2133,17 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
     try {
       const adminKey = (process.env.ADMIN_API_KEY || '').trim();
       if (adminKey) {
+        const ingestBase = buildApiBase(req);
+        const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+        const settings = settingsSnap.val() || {};
+        const ingestDays = Number(settings.initialIngestDays || 30);
+        
         const today = new Date();
         const endD = new Date(today); endD.setDate(today.getDate() - 1);
-        const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+        const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
         const fmt = (d: Date) => d.toISOString().slice(0, 10);
         const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-        fetchWithTimeout(`${buildAppBase(req)}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+        fetchWithTimeout(`${ingestBase}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
       }
     } catch {}
   return settingsRedirect(res, req, 'google_ads', true);
@@ -2323,16 +2350,21 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         }
         if (accountId) {
           await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
-          // Fire-and-forget initial ingest when account is chosen
+          // Fire-and-forget initial ingest (kullanıcının initialIngestDays ayarını oku)
           try {
             const adminKey = (process.env.ADMIN_API_KEY || '').trim();
             if (adminKey) {
+              const ingestBase = buildApiBase(req);
+              const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+              const settings = settingsSnap.val() || {};
+              const ingestDays = Number(settings.initialIngestDays || 30);
+              
               const today = new Date();
               const endD = new Date(today); endD.setDate(today.getDate() - 1);
-              const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+              const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
               const fmt = (d: Date) => d.toISOString().slice(0, 10);
               const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-              fetchWithTimeout(`${buildAppBase(req)}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+              fetchWithTimeout(`${ingestBase}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
             }
           } catch {}
         }
@@ -2358,12 +2390,13 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         try {
           const adminKey = (process.env.ADMIN_API_KEY || '').trim();
           if (adminKey) {
+            const ingestBase = buildApiBase(req);
             const today = new Date();
             const endD = new Date(today); endD.setDate(today.getDate() - 1);
             const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
             const fmt = (d: Date) => d.toISOString().slice(0, 10);
             const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-            fetchWithTimeout(`${buildAppBase(req)}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+            fetchWithTimeout(`${ingestBase}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
           }
         } catch {}
         return res.json({ message: 'LinkedIn Ads reklam hesabı güncellendi.', accountId });
@@ -2658,15 +2691,22 @@ router.get('/api/googleads/diagnose', async (req, res) => {
 
       const bq = getBigQuery();
       const dataset = process.env.BQ_DATASET || 'iqsion';
+      // Duplicate'leri önlemek için her date için MAX(createdAt) olan satırları seç
       const sql = `
-        SELECT date,
-               SUM(CAST(impressions AS INT64)) AS impressions,
-               SUM(CAST(clicks AS INT64)) AS clicks,
-               SUM(CAST(costMicros AS INT64)) AS costMicros
-        FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-        WHERE userId = @userId AND source = 'meta_ads' AND date BETWEEN @start AND @end
-        GROUP BY date
-        ORDER BY date
+        WITH latest AS (
+          SELECT userId, source, date, MAX(createdAt) as maxCreated
+          FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+          WHERE userId = @userId AND source = 'meta_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
+          GROUP BY userId, source, date
+        )
+        SELECT m.date,
+               SUM(CAST(m.impressions AS INT64)) AS impressions,
+               SUM(CAST(m.clicks AS INT64)) AS clicks,
+               SUM(CAST(m.costMicros AS INT64)) AS costMicros
+        FROM \`${bq.projectId}.${dataset}.metrics_daily\` m
+        INNER JOIN latest l ON m.userId=l.userId AND m.source=l.source AND m.date=l.date AND m.createdAt=l.maxCreated
+        GROUP BY m.date
+        ORDER BY m.date
       `;
       const [job] = await bq.createQueryJob({
         query: sql,
@@ -2677,7 +2717,7 @@ router.get('/api/googleads/diagnose', async (req, res) => {
 
       const map: Record<string, { impressions: number; clicks: number; spend: number; }> = {};
       for (const r of rows as any[]) {
-        const d = String(r.date);
+        const d = normalizeBqDate(r.date);
         const impressions = Number(r.impressions || 0);
         const clicks = Number(r.clicks || 0);
         const spend = Number(r.costMicros || 0) / 1_000_000;
@@ -3201,16 +3241,22 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         updatedAt: new Date().toISOString(),
       });
       console.log('[META CALLBACK] saved connection for userId=', userId, { accountId, accountName: accountName || undefined });
-      // Fire-and-forget initial BigQuery ingest for last 30 days
+      // Fire-and-forget initial BigQuery ingest (kullanıcının initialIngestDays ayarını oku)
       try {
         const adminKey = (process.env.ADMIN_API_KEY || '').trim();
         if (adminKey) {
+          const ingestBase = buildApiBase(req);
+          // Kullanıcının initialIngestDays ayarını oku
+          const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+          const settings = settingsSnap.val() || {};
+          const ingestDays = Number(settings.initialIngestDays || 30);
+          
           const today = new Date();
           const endD = new Date(today); endD.setDate(today.getDate() - 1);
-          const startD = new Date(endD); startD.setDate(endD.getDate() - 29);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
           const fmt = (d: Date) => d.toISOString().slice(0, 10);
           const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-          fetchWithTimeout(`${buildAppBase(req)}/api/ingest/meta-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+          fetchWithTimeout(`${ingestBase}/api/ingest/meta-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
         }
       } catch {}
       return settingsRedirect(res, req, 'meta_ads', true);
@@ -3577,7 +3623,7 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       // Zero-fill date series
       const map: Record<string, any> = {};
       for (const r of rows as any[]) {
-        const d = String(r.date);
+        const d = normalizeBqDate(r.date);
         map[d] = {
           sessions: Number(r.sessions || 0),
           avgSessionDurationSec: Number(r.avgSessionDurationSec || 0),
@@ -3733,12 +3779,13 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       try {
         const adminKey = (process.env.ADMIN_API_KEY || '').trim();
         if (adminKey) {
+          const ingestBase = buildApiBase(req);
           const today = new Date();
           const endD = new Date(today); endD.setDate(today.getDate() - 1);
           const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
           const fmt = (d: Date) => d.toISOString().slice(0, 10);
           const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD), propertyId });
-          fetchWithTimeout(`${buildAppBase(req)}/api/ingest/ga4`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
+          fetchWithTimeout(`${ingestBase}/api/ingest/ga4`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
         }
       } catch {}
   return settingsRedirect(res, req, 'google_analytics', true);
@@ -3874,12 +3921,13 @@ router.get('/api/auth/linkedin/callback', async (req, res) => {
     try {
       const adminKey = (process.env.ADMIN_API_KEY || '').trim();
       if (adminKey) {
+        const ingestBase = buildApiBase(req);
         const today = new Date();
         const endD = new Date(today); endD.setDate(today.getDate() - 1);
         const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
         const fmt = (d: Date) => d.toISOString().slice(0,10);
         const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-        fetchWithTimeout(`${buildAppBase(req)}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
+        fetchWithTimeout(`${ingestBase}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
       }
     } catch {}
     return settingsRedirect(res, req, 'linkedin_ads', true);
@@ -4285,8 +4333,17 @@ router.get('/api/settings', async (req, res) => {
     const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
     const snap = await admin.database().ref(`settings/${uid}`).once('value');
     const val = snap.val() || {};
-    // Varsayılan retention
-    if (typeof val.retentionDays !== 'number') val.retentionDays = Number(process.env.DEFAULT_RETENTION_DAYS || 90);
+    const defaultRetention = Number(process.env.DEFAULT_RETENTION_DAYS || 90);
+    if (typeof val.retentionDays !== 'number') val.retentionDays = defaultRetention;
+    if (typeof val.initialIngestDays !== 'number') val.initialIngestDays = 30;
+    if (!val.platforms || typeof val.platforms !== 'object') val.platforms = {};
+    if (!val.platforms.meta_ads || typeof val.platforms.meta_ads !== 'object') val.platforms.meta_ads = {};
+    if (typeof val.platforms.meta_ads.retentionDays !== 'number') {
+      val.platforms.meta_ads.retentionDays = val.retentionDays;
+    }
+    if (typeof val.platforms.meta_ads.initialIngestDays !== 'number') {
+      val.platforms.meta_ads.initialIngestDays = val.initialIngestDays;
+    }
     return res.json(val);
   } catch (e) {
     return res.status(500).json({ message: 'Settings okunamadı' });
@@ -4309,6 +4366,27 @@ router.post('/api/ingest/ga4', async (req, res) => {
     const gaConn = gaConnSnap.val() || {};
     const propertyId = (bodyPropertyId || (req.query.propertyId as string) || gaConn?.propertyId);
     if (!propertyId) return res.status(400).json({ message: 'No GA4 property selected' });
+
+    // Eski GA4 kayıtlarını temizle (daily + geo) ki tekrar ingest duplikasyon yaratmasın
+    try {
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const params = { userId: uid, start: startDate, end: endDate, propertyId };
+      const queries = [
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND (propertyId IS NULL OR propertyId = @propertyId)`,
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND (propertyId IS NULL OR propertyId = @propertyId)`
+      ];
+      for (const sql of queries) {
+        const [job] = await bq.createQueryJob({
+          query: sql,
+          params,
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        await job.getQueryResults();
+      }
+    } catch (err) {
+      console.error('[GA4 INGEST] Delete old GA4 data failed:', err);
+    }
 
     // Access token refresh if needed (reuse logic similar to properties endpoint)
     let accessToken: string = bodyAccessToken || gaConn.accessToken || '';
@@ -4500,6 +4578,24 @@ router.post('/api/ingest/shopify', async (req, res) => {
     const accessToken = String(shopConn.accessToken || '');
     if (!storeUrl || !accessToken) return res.status(400).json({ message: 'Shopify bağlantısı bulunamadı (storeUrl/accessToken)' });
 
+    // Önce bu tarih aralığındaki eski Shopify verilerini temizle
+    try {
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const deleteSql = `
+        DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'shopify' AND date BETWEEN DATE(@start) AND DATE(@end)
+      `;
+      const [deleteJob] = await bq.createQueryJob({
+        query: deleteSql,
+        params: { userId: uid, start: startDate, end: endDate },
+        location: process.env.BQ_LOCATION || 'US',
+      });
+      await deleteJob.getQueryResults();
+    } catch (err) {
+      console.error('[Shopify INGEST] Delete old data failed:', err);
+    }
+
     const baseUrl = `https://${storeUrl}/admin/api/2023-10`;
     const headers = { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } as any;
 
@@ -4582,6 +4678,24 @@ router.post('/api/ingest/google-ads', async (req, res) => {
       developedToken: !!process.env.GOOGLE_ADS_DEVELOPER_TOKEN
     });
 
+    // Önce bu tarih aralığındaki eski Google Ads verilerini sil (duplicate önleme)
+    try {
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const deleteSql = `
+        DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
+      `;
+      const [deleteJob] = await bq.createQueryJob({
+        query: deleteSql,
+        params: { userId: uid, start: startDate, end: endDate },
+        location: process.env.BQ_LOCATION || 'US',
+      });
+      await deleteJob.getQueryResults();
+    } catch (e) {
+      console.error('[Google Ads INGEST] Delete old data failed:', e);
+    }
+
     const api = new GoogleAdsApi({
       client_id: oauth_client_id,
       client_secret: oauth_client_secret,
@@ -4625,8 +4739,6 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
   try {
     const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
     const uid = String(userId || 'test-user');
-    const since = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    const until = (to && String(to)) || new Date().toISOString().slice(0, 10);
 
     const snap = await admin.database().ref(`platformConnections/${uid}/meta_ads`).once('value');
     const meta = snap.val() || {};
@@ -4635,10 +4747,29 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
     if (!adAccountId) return res.status(400).json({ message: 'Meta Ads bağlantısı eksik (accountId/accessToken)' });
     if (!String(adAccountId).startsWith('act_')) adAccountId = 'act_' + String(adAccountId).replace(/[^0-9]/g,'');
 
+    const settingsSnap = await admin.database().ref(`settings/${uid}`).once('value');
+    const userSettings = settingsSnap.val() || {};
+    const metaPrefs = (userSettings.platforms && userSettings.platforms.meta_ads) || {};
+    const defaultInitial = Number(metaPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
+    const defaultRetention = Number(metaPrefs.retentionDays || userSettings.retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
+    const fallbackEnd = (to && String(to)) || new Date().toISOString().slice(0, 10);
+    const windowDays = Math.max(1, (from || meta.lastSyncAt) ? Number(defaultRetention) : Number(defaultInitial));
+    const computeStart = () => {
+      const end = new Date(fallbackEnd);
+      end.setHours(0, 0, 0, 0);
+      const start = new Date(end);
+      start.setDate(start.getDate() - (windowDays - 1));
+      return start.toISOString().slice(0, 10);
+    };
+    const since = (from && String(from)) || computeStart();
+    const until = fallbackEnd;
+
+    // MERGE kullandığımız için DELETE'e gerek yok (streaming buffer sorunu çözüldü)
+
     const fields = [
-      'impressions','clicks','spend','actions','action_values','campaign_id','campaign_name','date_start'
+      'impressions','clicks','spend','actions','action_values','date_start'
     ].join(',');
-    let url = `https://graph.facebook.com/v19.0/${encodeURIComponent(adAccountId)}/insights?fields=${fields}&level=campaign&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${encodeURIComponent(accessToken)}`;
+    let url = `https://graph.facebook.com/v19.0/${encodeURIComponent(adAccountId)}/insights?fields=${fields}&level=account&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${encodeURIComponent(accessToken)}`;
     let inserted = 0;
     for (let page = 0; page < 10 && url; page++) {
       const resp = await fetchWithTimeout(url, { method: 'GET' }, 20000);
@@ -4662,7 +4793,7 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
           userId: uid,
           source: 'meta_ads',
           date,
-          campaignId: String(insight.campaign_id || ''),
+          campaignId: null as any,
           impressions,
           clicks,
           costMicros: Math.round(spend * 1_000_000),
@@ -4677,6 +4808,21 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
       }
       url = (j.paging && j.paging.next) ? j.paging.next : '';
     }
+    try {
+      await admin.database().ref(`platformConnections/${uid}/meta_ads`).update({
+        lastSyncAt: new Date().toISOString(),
+        lastIngestRange: { since, until },
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[Meta INGEST] failed to update connection metadata:', err);
+    }
+    // Retention cleanup artık MERGE ile otomatik (eski DELETE streaming buffer hatası veriyordu)
+    // try {
+    //   await applyRetentionForUserAndSource(uid, 'meta_ads', Number(defaultRetention) || 90);
+    // } catch (err) {
+    //   console.error('[Meta INGEST] retention cleanup failed:', err);
+    // }
     return res.json({ ok: true, inserted, since, until });
   } catch (e: any) {
     return res.status(500).json({ message: 'Meta Ads ingest failed', error: e?.message || 'error' });
@@ -4689,12 +4835,47 @@ router.post('/api/settings', async (req, res) => {
     let userUid: any = req.headers['x-user-uid'] || req.query.userId || req.body?.userId;
     if (Array.isArray(userUid)) userUid = userUid[0];
     const uid = typeof userUid === 'string' && userUid.length > 0 ? userUid : 'test-user';
-    const { retentionDays } = (req.body || {}) as { retentionDays?: number };
-    const days = Number(retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
-    await admin.database().ref(`settings/${uid}`).update({ retentionDays: days, updatedAt: Date.now() });
-    // Retention uygula (hemen temizlik yap)
-    try { await applyRetentionForUser(uid, days); } catch (e) { /* sessiz */ }
-    return res.json({ ok: true, retentionDays: days });
+    const { retentionDays, initialIngestDays, platforms } = (req.body || {}) as {
+      retentionDays?: number;
+      initialIngestDays?: number;
+      platforms?: Record<string, { retentionDays?: number; initialIngestDays?: number }>;
+    };
+    
+    const updateData: any = { updatedAt: Date.now() };
+    
+    if (typeof retentionDays === 'number') {
+      const days = Number(retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
+      updateData.retentionDays = days;
+      try { await applyRetentionForUser(uid, days); } catch (e) { /* sessiz */ }
+    }
+    
+    if (typeof initialIngestDays === 'number') {
+      updateData.initialIngestDays = Number(initialIngestDays || 30);
+    }
+
+    const baseRef = admin.database().ref(`settings/${uid}`);
+    await baseRef.update(updateData);
+
+    if (platforms && typeof platforms === 'object') {
+      const metaInput = platforms.meta_ads;
+      if (metaInput && typeof metaInput === 'object') {
+        const payload: any = {};
+        if (typeof metaInput.retentionDays === 'number') {
+          payload.retentionDays = Number(metaInput.retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
+          try { await applyRetentionForUserAndSource(uid, 'meta_ads', payload.retentionDays); } catch (e) { /* sessiz */ }
+        }
+        if (typeof metaInput.initialIngestDays === 'number') {
+          payload.initialIngestDays = Number(metaInput.initialIngestDays || 30);
+        }
+        if (Object.keys(payload).length > 0) {
+          payload.updatedAt = Date.now();
+          await baseRef.child('platforms/meta_ads').update(payload);
+        }
+      }
+    }
+
+    const snapshot = await baseRef.once('value');
+    return res.json(snapshot.val() || {});
   } catch (e) {
     return res.status(500).json({ message: 'Settings kaydedilemedi' });
   }
