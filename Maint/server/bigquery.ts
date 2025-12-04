@@ -91,46 +91,78 @@ export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: num
   if (!rows.length) return { inserted: 0 };
   
   const bq = getBigQuery();
-  const { table } = await ensureDatasetAndTable();
+  await ensureDatasetAndTable();
   
-  // WORKAROUND: Streaming insert yerine batch DML INSERT kullan
-  // MERGE UPDATE yapınca streaming buffer'a takılıyor, sadece INSERT ile devam
-  // Dashboard tarafında MAX(createdAt) ile en yeni satırları alacağız
-  const payload = rows.map(r => ({
-    ...r,
-    createdAt: r.createdAt || new Date().toISOString(),
-  }));
+  // GROUP rows by (userId, source) to minimize DELETE queries
+  const grouped = new Map<string, MetricsRow[]>();
+  for (const r of rows) {
+    const key = `${r.userId}|||${r.source}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(r);
+  }
 
-  // Batch INSERT query
-  const values = payload.map(r => {
-    const userId = String(r.userId || '').replace(/'/g, "\\'");
-    const source = String(r.source || '').replace(/'/g, "\\'");
-    const date = String(r.date || '1970-01-01');
-    const campaignId = r.campaignId ? `'${String(r.campaignId).replace(/'/g, "\\'")}'` : 'NULL';
-    const adGroupId = r.adGroupId ? `'${String(r.adGroupId).replace(/'/g, "\\'")}'` : 'NULL';
-    const impressions = r.impressions ?? 'NULL';
-    const clicks = r.clicks ?? 'NULL';
-    const costMicros = r.costMicros ?? 'NULL';
-    const sessions = r.sessions ?? 'NULL';
-    const transactions = r.transactions ?? 'NULL';
-    const revenueMicros = r.revenueMicros ?? 'NULL';
-    const createdAt = `TIMESTAMP('${r.createdAt}')`;
-    return `('${userId}', '${source}', DATE('${date}'), ${campaignId}, ${adGroupId}, ${impressions}, ${clicks}, ${costMicros}, ${sessions}, ${transactions}, ${revenueMicros}, ${createdAt})`;
-  }).join(',\n      ');
+  let totalInserted = 0;
 
-  const insertSql = `
-    INSERT INTO \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
-    (userId, source, date, campaignId, adGroupId, impressions, clicks, costMicros, sessions, transactions, revenueMicros, createdAt)
-    VALUES ${values}
-  `;
+  for (const [key, groupRows] of grouped.entries()) {
+    const [userId, source] = key.split('|||');
+    const dates = groupRows.map(r => r.date);
+    const minDate = dates.sort()[0];
+    const maxDate = dates.sort().reverse()[0];
 
-  const [job] = await bq.createQueryJob({
-    query: insertSql,
-    location: BQ_LOCATION,
-  });
-  await job.getQueryResults();
+    // STEP 1: DELETE existing rows for this userId+source+date range (NO streaming buffer conflict)
+    const deleteSql = `
+      DELETE FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
+      WHERE userId = @userId AND source = @source AND date >= DATE(@minDate) AND date <= DATE(@maxDate)
+    `;
+    try {
+      const [deleteJob] = await bq.createQueryJob({
+        query: deleteSql,
+        params: { userId, source, minDate, maxDate },
+        location: BQ_LOCATION,
+      });
+      await deleteJob.getQueryResults();
+    } catch (err) {
+      console.error(`[BigQuery] DELETE failed for ${userId}/${source}:`, err);
+      // Continue anyway, INSERT will create duplicates but better than failing
+    }
 
-  return { inserted: payload.length };
+    // STEP 2: INSERT new rows
+    const payload = groupRows.map(r => ({
+      ...r,
+      createdAt: r.createdAt || new Date().toISOString(),
+    }));
+
+    const values = payload.map(r => {
+      const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
+      const sourceEsc = String(r.source || '').replace(/'/g, "\\'");
+      const date = String(r.date || '1970-01-01');
+      const campaignId = r.campaignId ? `'${String(r.campaignId).replace(/'/g, "\\'")}'` : 'NULL';
+      const adGroupId = r.adGroupId ? `'${String(r.adGroupId).replace(/'/g, "\\'")}'` : 'NULL';
+      const impressions = r.impressions ?? 'NULL';
+      const clicks = r.clicks ?? 'NULL';
+      const costMicros = r.costMicros ?? 'NULL';
+      const sessions = r.sessions ?? 'NULL';
+      const transactions = r.transactions ?? 'NULL';
+      const revenueMicros = r.revenueMicros ?? 'NULL';
+      const createdAt = `TIMESTAMP('${r.createdAt}')`;
+      return `('${userIdEsc}', '${sourceEsc}', DATE('${date}'), ${campaignId}, ${adGroupId}, ${impressions}, ${clicks}, ${costMicros}, ${sessions}, ${transactions}, ${revenueMicros}, ${createdAt})`;
+    }).join(',\n      ');
+
+    const insertSql = `
+      INSERT INTO \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
+      (userId, source, date, campaignId, adGroupId, impressions, clicks, costMicros, sessions, transactions, revenueMicros, createdAt)
+      VALUES ${values}
+    `;
+
+    const [insertJob] = await bq.createQueryJob({
+      query: insertSql,
+      location: BQ_LOCATION,
+    });
+    await insertJob.getQueryResults();
+    totalInserted += payload.length;
+  }
+
+  return { inserted: totalInserted };
 }
 
 export async function queryByUserAndRange(userId: string, from: string, to: string) {

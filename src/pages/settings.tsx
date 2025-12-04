@@ -147,47 +147,25 @@ export default function Settings() {
     }
   });
 
-  const [retentionValue, setRetentionValue] = useState<string>('90');
+  // Tek ayar: Tüm platformlar için
+  const [retentionDays, setRetentionDays] = useState<string>('90');
   const [initialIngestDays, setInitialIngestDays] = useState<string>('30');
-  const [metaRetentionDays, setMetaRetentionDays] = useState<string>('90');
-  const [metaInitialDays, setMetaInitialDays] = useState<string>('30');
   
   useEffect(() => {
     if (userSettings && typeof (userSettings as any).retentionDays === 'number') {
-      setRetentionValue(String((userSettings as any).retentionDays));
+      setRetentionDays(String((userSettings as any).retentionDays));
     }
     if (userSettings && typeof (userSettings as any).initialIngestDays === 'number') {
       setInitialIngestDays(String((userSettings as any).initialIngestDays));
     }
-    const metaPrefs = (userSettings as any)?.platforms?.meta_ads;
-    if (metaPrefs && typeof metaPrefs.retentionDays === 'number') {
-      setMetaRetentionDays(String(metaPrefs.retentionDays));
-    }
-    if (metaPrefs && typeof metaPrefs.initialIngestDays === 'number') {
-      setMetaInitialDays(String(metaPrefs.initialIngestDays));
-    }
   }, [userSettings]);
 
-  const handleSaveRetention = () => {
-    const days = Number(retentionValue || '90');
-    saveSettingsMutation.mutate({ retentionDays: days });
-  };
-
-  const handleSaveInitialIngest = () => {
-    const days = Number(initialIngestDays || '30');
-    saveSettingsMutation.mutate({ initialIngestDays: days });
-  };
-
-  const handleSaveMetaPreferences = () => {
-    const retention = Number(metaRetentionDays || '90');
-    const initial = Number(metaInitialDays || '30');
-    saveSettingsMutation.mutate({
-      platforms: {
-        meta_ads: {
-          retentionDays: retention,
-          initialIngestDays: initial,
-        }
-      }
+  const handleSaveDataSettings = () => {
+    const retention = Number(retentionDays || '90');
+    const initial = Number(initialIngestDays || '30');
+    saveSettingsMutation.mutate({ 
+      retentionDays: retention,
+      initialIngestDays: initial
     });
   };
 
@@ -773,100 +751,22 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Veri Saklama Süresi */}
+            {/* Veri Saklama Süresi - TEK KART */}
             <Card className="bg-slate-800 border-slate-700">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-white">
                   <SettingsIcon className="w-5 h-5" /> Veri Saklama Süresi
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
                 <div className="text-sm text-slate-300">
                   Büyük sorgu maliyetlerini kontrol etmek için verilerin saklanacağı süreyi seçin. Daha kısa süre daha düşük maliyet ve daha hızlı sorgu demektir.
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Select value={retentionValue} onValueChange={setRetentionValue}>
-                    <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-48">
-                      <SelectValue placeholder="Süre seçin" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-800 border-slate-700">
-                      <SelectItem value="30">30 gün</SelectItem>
-                      <SelectItem value="90">90 gün</SelectItem>
-                      <SelectItem value="180">180 gün</SelectItem>
-                      <SelectItem value="365">365 gün</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleSaveRetention} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
-                    {saveSettingsMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Kaydediliyor...
-                      </>
-                    ) : (
-                      'Kaydet'
-                    )}
-                  </Button>
-                </div>
-                <div className="text-xs text-slate-400">
-                  Not: Sistem genel üst sınırı 90 gün olarak ayarlıdır; daha kısa süre seçerseniz eski verileriniz hemen temizlenir.
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* İlk Bağlantıda Veri Çekimi */}
-            <Card className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-white">
-                  <Database className="w-5 h-5" /> İlk Bağlantıda Veri Çekimi
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="text-sm text-slate-300">
-                  Yeni bir platform bağladığınızda geriye dönük kaç günlük veri çekilsin? Daha uzun süre seçmek ilk bağlantıyı biraz yavaşlatabilir.
-                </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Select value={initialIngestDays} onValueChange={setInitialIngestDays}>
-                    <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-48">
-                      <SelectValue placeholder="Süre seçin" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-800 border-slate-700">
-                      <SelectItem value="30">30 gün</SelectItem>
-                      <SelectItem value="60">60 gün</SelectItem>
-                      <SelectItem value="90">90 gün</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleSaveInitialIngest} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
-                    {saveSettingsMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Kaydediliyor...
-                      </>
-                    ) : (
-                      'Kaydet'
-                    )}
-                  </Button>
-                </div>
-                <div className="text-xs text-slate-400">
-                  Varsayılan: 30 gün. Bu ayar sadece yeni platform bağlantıları için geçerlidir.
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Meta Ads Veri Penceresi */}
-            <Card className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-white">
-                  <Globe className="w-5 h-5" /> Meta Ads Veri Penceresi
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-slate-300">
-                  Meta bağlantısı, seçtiğiniz aralık kadar geriye dönük veri çeker ve sadece bu süredeki kayıtları BigQuery'de saklar.
-                </p>
+                
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-xs uppercase tracking-wide text-slate-400">İlk bağlantıda çekilecek gün</label>
-                    <Select value={metaInitialDays} onValueChange={setMetaInitialDays}>
+                    <Select value={initialIngestDays} onValueChange={setInitialIngestDays}>
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-full">
                         <SelectValue placeholder="Süre seçin" />
                       </SelectTrigger>
@@ -879,32 +779,33 @@ export default function Settings() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs uppercase tracking-wide text-slate-400">BigQuery'de saklanacak gün</label>
-                    <Select value={metaRetentionDays} onValueChange={setMetaRetentionDays}>
+                    <Select value={retentionDays} onValueChange={setRetentionDays}>
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-full">
                         <SelectValue placeholder="Süre seçin" />
                       </SelectTrigger>
                       <SelectContent className="bg-slate-800 border-slate-700">
                         <SelectItem value="30">30 gün</SelectItem>
-                        <SelectItem value="60">60 gün</SelectItem>
                         <SelectItem value="90">90 gün</SelectItem>
                         <SelectItem value="180">180 gün</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                <Button onClick={handleSaveMetaPreferences} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
+
+                <Button onClick={handleSaveDataSettings} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
                   {saveSettingsMutation.isPending ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Kaydediliyor...
                     </>
                   ) : (
-                    'Meta için Kaydet'
+                    'Kaydet'
                   )}
                 </Button>
-                <p className="text-xs text-slate-400">
-                  Bu ayarlar yalnızca Meta reklam verilerini etkiler; seçtiğiniz aralıkların dışındaki satırlar otomatik silinir.
-                </p>
+                
+                <div className="text-xs text-slate-400">
+                  Bu ayarlar TÜMM platformlar için geçerlidir (Meta Ads, Google Ads, Shopify, GA4).
+                </div>
               </CardContent>
             </Card>
 

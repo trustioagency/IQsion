@@ -55,9 +55,21 @@ export function useAuth() {
     },
   });
 
+  const logout = () => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem("userUid");
+      window.location.href = "/login";
+    } catch (error) {
+      console.error("Logout hatası:", error);
+      window.location.href = "/login";
+    }
+  };
+
   return {
     user,
     isLoading,
     isAuthenticated: !!user,
+    logout,
   };
 }

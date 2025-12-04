@@ -890,6 +890,27 @@ router.get('/api/auth/shopify/callback', async (req, res) => {
       updatedAt: new Date().toISOString(),
       ...(Date.now() ? { createdAt: Date.now() } : {}),
     });
+    
+    // Fire-and-forget initial BigQuery ingest
+    try {
+      const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+      if (adminKey) {
+        const ingestBase = buildApiBase(req);
+        const settingsSnap = await admin.database().ref(`settings/${stateUid}`).once('value');
+        const settings = settingsSnap.val() || {};
+        const ingestDays = Number(settings.initialIngestDays || 30);
+        
+        const today = new Date();
+        const endD = new Date(today); endD.setDate(today.getDate() - 1);
+        const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        const body = JSON.stringify({ userId: stateUid, from: fmt(startD), to: fmt(endD) });
+        fetchWithTimeout(`${ingestBase}/api/ingest/shopify`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
+      }
+    } catch (err) {
+      console.error('[Shopify CALLBACK] initial ingest failed:', err);
+    }
+    
     // Kullanıcıyı ayarlar sayfasına yönlendir
     return settingsRedirect(res, req, 'shopify', true);
   } catch (err) {
@@ -2487,15 +2508,38 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       };
       const platform = normalize(rawPlatform);
       const refBase = admin.database().ref(`platformConnections/${userId}`);
-      // Remove normalized path
+      
+      // Remove Firebase connection
       await refBase.child(platform).remove();
+      
       // Backwards-compat: if caller sent the other alias, remove both
       if (rawPlatform === 'google_search_console') {
         await refBase.child('google_search_console').remove().catch(() => {});
       } else if (rawPlatform === 'search_console') {
         await refBase.child('google_search_console').remove().catch(() => {});
       }
-      return res.json({ message: `${platform} bağlantısı kaldırıldı.` });
+
+      // BigQuery cleanup: Delete all data for this platform
+      try {
+        const bq = getBigQuery();
+        const dataset = process.env.BQ_DATASET || 'iqsion';
+        const deleteSql = `
+          DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+          WHERE userId = @userId AND source = @source
+        `;
+        const [job] = await bq.createQueryJob({
+          query: deleteSql,
+          params: { userId, source: platform },
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        await job.getQueryResults();
+        console.log(`[DISCONNECT] Deleted BigQuery data for ${userId}/${platform}`);
+      } catch (bqErr) {
+        console.error(`[DISCONNECT] BigQuery cleanup failed for ${userId}/${platform}:`, bqErr);
+        // Don't fail the disconnect if BigQuery cleanup fails
+      }
+
+      return res.json({ message: `${platform} bağlantısı ve verileri kaldırıldı.` });
     } catch (error) {
       return res.status(500).json({ message: 'Bağlantı kaldırılamadı', error: error instanceof Error ? error.message : String(error) });
     }
@@ -4880,3 +4924,104 @@ router.post('/api/settings', async (req, res) => {
     return res.status(500).json({ message: 'Settings kaydedilemedi' });
   }
 });
+
+// ===== Daily Auto-Sync for All Connected Users (Cron Job Endpoint) =====
+router.post('/api/cron/daily-sync', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  
+  try {
+    const allConnsSnap = await admin.database().ref('platformConnections').once('value');
+    const allConns = allConnsSnap.val() || {};
+    
+    const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
+    const today = new Date();
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    
+    for (const [userId, userConns] of Object.entries(allConns)) {
+      const platforms = userConns as Record<string, any>;
+      
+      // Kullanıcının retention ayarını oku (varsayılan 90 gün)
+      const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+      const settings = settingsSnap.val() || {};
+      const retentionDays = Number(settings.retentionDays || 90);
+      const syncStart = new Date(today); syncStart.setDate(today.getDate() - retentionDays);
+      
+      // Meta Ads
+      if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/meta-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'meta_ads', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'meta_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Google Ads
+      if (platforms.google_ads?.isConnected && platforms.google_ads?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/google-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'google_ads', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'google_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Shopify
+      if (platforms.shopify?.isConnected && platforms.shopify?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/shopify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'shopify', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'shopify', status: 'error', error: err.message });
+        }
+      }
+      
+      // GA4
+      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'ga4', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'ga4', status: 'error', error: err.message });
+        }
+      }
+    }
+    
+    return res.json({ 
+      message: 'Daily sync completed', 
+      timestamp: new Date().toISOString(),
+      totalJobs: results.length,
+      successful: results.filter(r => r.status === 'success').length,
+      failed: results.filter(r => r.status === 'error').length,
+      results 
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Daily sync failed', error: e.message });
+  }
+});
+
