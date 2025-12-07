@@ -33,13 +33,16 @@ import {
   Zap,
   CheckSquare,
   Users2,
-  Play
+  Play,
+  Sun,
+  Moon
 } from "lucide-react";
 import { NAVIGATION_ITEMS } from "../../lib/constants";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { navigation } from "../../lib/navigation";
 import { cn } from "../../lib/utils";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { useTheme } from "../../contexts/ThemeContext";
 
 const iconMap = {
   BarChart3,
@@ -83,6 +86,7 @@ export default function Sidebar() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const isMobile = useIsMobile();
   const { language, t } = useLanguage();
+  const { theme, toggleTheme } = useTheme();
 
   const toggleSidebar = () => {
     if (isMobile) {
@@ -99,23 +103,35 @@ export default function Sidebar() {
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-slate-800 border-r border-slate-700">
+    <div className="flex flex-col h-full bg-black dark:bg-black light:bg-white/90 border-r border-gray-900 dark:border-gray-900 light:border-slate-200">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-700">
+      <div className="flex items-center justify-between p-4 border-b border-gray-800 dark:border-gray-800 light:border-slate-200">
         {(!isCollapsed || isMobile) && (
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-lg font-bold text-white">Pazarlama Zekası</span>
-          </div>
+          <a 
+            href="/dashboard" 
+            className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer"
+            onClick={(e) => {
+              e.preventDefault();
+              setLocation("/dashboard");
+              closeMobileSidebar();
+            }}
+          >
+            <img 
+              src="/iqsion.logo.png" 
+              alt="IQsion" 
+              className="w-8 h-8 object-contain mix-blend-lighten drop-shadow-lg"
+            />
+            <span className="text-lg font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 bg-clip-text text-transparent">
+              IQsion
+            </span>
+          </a>
         )}
 
         <Button
           variant="ghost"
           size="sm"
           onClick={toggleSidebar}
-          className="text-slate-400 hover:text-white p-1"
+          className="text-slate-400 dark:text-slate-400 light:text-slate-600 hover:text-white dark:hover:text-white light:hover:text-blue-600 p-1"
         >
           {isMobile ? (
             isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />
@@ -140,7 +156,7 @@ export default function Sidebar() {
           ).map(([category, items]) => (
             <div key={category}>
               {(!isCollapsed || isMobile) && (
-                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 px-3">
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-500 light:text-slate-400 uppercase tracking-wider mb-3 px-3">
                   {category === 'genel' && t('general')}
                   {category === 'analiz' && t('analysis')}
                   {category === 'cro' && t('cro')}
@@ -163,7 +179,7 @@ export default function Sidebar() {
                         "sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium cursor-pointer rounded-lg transition-colors",
                         isActive
                           ? 'active bg-blue-600 text-white'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                          : 'text-slate-300 dark:text-slate-300 light:text-slate-700 hover:text-white dark:hover:text-white light:hover:text-blue-600 hover:bg-gray-800 dark:hover:bg-gray-800 light:hover:bg-blue-50'
                       )}
                       onClick={(e) => {
                         e.preventDefault();
@@ -185,8 +201,26 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-slate-700">
-        <div className="flex items-center gap-2 text-sm text-slate-400">
+      <div className="p-4 border-t border-gray-800 dark:border-gray-800 light:border-slate-200 space-y-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleTheme}
+          className="w-full justify-start text-slate-400 dark:text-slate-400 light:text-slate-600 hover:text-white dark:hover:text-white light:hover:text-blue-600 hover:bg-gray-800 dark:hover:bg-gray-800 light:hover:bg-blue-50"
+        >
+          {theme === "dark" ? (
+            <>
+              <Moon className="w-4 h-4 mr-2" />
+              {(!isCollapsed || isMobile) && <span>Koyu Tema</span>}
+            </>
+          ) : (
+            <>
+              <Sun className="w-4 h-4 mr-2" />
+              {(!isCollapsed || isMobile) && <span>Açık Tema</span>}
+            </>
+          )}
+        </Button>
+        <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-400 light:text-slate-500">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
           {(!isCollapsed || isMobile) && <span>{language === 'tr' ? 'Sistem Aktif' : t('systemActive')}</span>}
         </div>
@@ -217,7 +251,7 @@ export default function Sidebar() {
           variant="ghost"
           size="sm"
           onClick={() => setIsMobileOpen(true)}
-          className="text-slate-400 hover:text-white p-2 bg-slate-800/80 backdrop-blur-sm border border-slate-700"
+          className="text-slate-400 dark:text-slate-400 light:text-slate-600 hover:text-white dark:hover:text-white light:hover:text-blue-600 p-2 bg-gray-950/95 dark:bg-gray-950/95 light:bg-white/90 backdrop-blur-sm border border-gray-800 dark:border-gray-800 light:border-slate-200"
         >
           <Menu className="w-5 h-5" />
         </Button>

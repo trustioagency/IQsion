@@ -21,7 +21,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar, PieChart, Pie, Cell, Legend } from 'recharts';
 import { Clock as ClockIcon } from 'lucide-react';
 
-type DateRangeKey = '7d' | '30d' | '90d' | 'custom';
+type DateRangeKey = 'today' | 'yesterday' | '7d' | '30d' | '90d' | 'thisMonth' | 'custom';
 type ChannelKey = 'all' | 'google' | 'meta' | 'tiktok' | 'email' | 'organic' | 'shopify';
 type MetricKey = 'revenue' | 'roas' | 'conversions' | 'traffic' | 'cost';
 
@@ -120,12 +120,26 @@ export default function Dashboard() {
   // Helpers: resolve current absolute range and its previous range with equal length
   const getCurrentRangeDates = (key: DateRangeKey) => {
     const today = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    
+    if (key === 'today') {
+      return { startDate: fmt(today), endDate: fmt(today), days: 1 };
+    }
+    if (key === 'yesterday') {
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      return { startDate: fmt(yesterday), endDate: fmt(yesterday), days: 1 };
+    }
+    if (key === 'thisMonth') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { startDate: fmt(start), endDate: fmt(today), days: today.getDate() };
+    }
+    
     const end = new Date(today);
-    if (!includeToday) end.setDate(today.getDate() - 1); // default: use yesterday as end
+    if (!includeToday) end.setDate(today.getDate() - 1);
     const start = new Date(end);
     const days = key === '7d' ? 7 : key === '30d' ? 30 : key === '90d' ? 90 : 30;
     start.setDate(end.getDate() - (days - 1));
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
     return { startDate: fmt(start), endDate: fmt(end), days };
   };
 
@@ -152,7 +166,12 @@ export default function Dashboard() {
     return { startDate: fmt(prevStart), endDate: fmt(prevEnd), days: lengthDays };
   };
 
-  const daysForKey = (key: DateRangeKey) => (key === '7d' ? 7 : key === '30d' ? 30 : key === '90d' ? 90 : 30);
+  const daysForKey = (key: DateRangeKey) => {
+    if (key === 'today') return 1;
+    if (key === 'yesterday') return 1;
+    if (key === 'thisMonth') return new Date().getDate();
+    return key === '7d' ? 7 : key === '30d' ? 30 : key === '90d' ? 90 : 30;
+  };
 
   type MetaSummary = {
     rows: Array<{ date: string; spend: number; impressions: number; clicks: number; ctr: number }>;
@@ -162,12 +181,26 @@ export default function Dashboard() {
 
   const makeMetaRange = (key: DateRangeKey) => {
     const today = new Date();
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    
+    if (key === 'today') {
+      return { startDate: fmt(today), endDate: fmt(today) };
+    }
+    if (key === 'yesterday') {
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      return { startDate: fmt(yesterday), endDate: fmt(yesterday) };
+    }
+    if (key === 'thisMonth') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { startDate: fmt(start), endDate: fmt(today) };
+    }
+    
     const end = new Date(today);
     end.setDate(today.getDate() - 1);
     const start = new Date(end);
     const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 6;
     start.setDate(end.getDate() - days);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
     return { startDate: fmt(start), endDate: fmt(end) };
   };
 
@@ -182,12 +215,14 @@ export default function Dashboard() {
   }, [user, authLoading, toast, t]);
 
   const makeGaRange = (key: DateRangeKey) => {
-    const endKey = includeToday ? 'today' : 'yesterday';
     switch (key) {
-      case '7d': return { startDate: '7daysAgo', endDate: endKey };
-      case '30d': return { startDate: '30daysAgo', endDate: endKey };
-      case '90d': return { startDate: '90daysAgo', endDate: endKey };
-      default: return { startDate: '7daysAgo', endDate: endKey };
+      case 'today': return { startDate: 'today', endDate: 'today' };
+      case 'yesterday': return { startDate: 'yesterday', endDate: 'yesterday' };
+      case 'thisMonth': return { startDate: `${new Date().getDate() - 1}daysAgo`, endDate: 'today' };
+      case '7d': return { startDate: '7daysAgo', endDate: includeToday ? 'today' : 'yesterday' };
+      case '30d': return { startDate: '30daysAgo', endDate: includeToday ? 'today' : 'yesterday' };
+      case '90d': return { startDate: '90daysAgo', endDate: includeToday ? 'today' : 'yesterday' };
+      default: return { startDate: '7daysAgo', endDate: includeToday ? 'today' : 'yesterday' };
     }
   };
 
@@ -560,6 +595,10 @@ export default function Dashboard() {
     const rows = (metaSummary as any)?.rows || [];
     return { spend: rows.map((r: any) => r.spend || 0), impressions: rows.map((r: any) => r.impressions || 0), clicks: rows.map((r: any) => r.clicks || 0), ctr: rows.map((r: any) => r.ctr || 0) };
   }, [metaSummary]);
+  const googleAdsTrend = React.useMemo(() => {
+    const rows = (googleAdsSummary as any)?.rows || [];
+    return { spend: rows.map((r: any) => r.spend || 0), impressions: rows.map((r: any) => r.impressions || 0), clicks: rows.map((r: any) => r.clicks || 0), conversions: rows.map((r: any) => r.conversions || 0) };
+  }, [googleAdsSummary]);
   const shopifyTrend = React.useMemo(() => {
     const rows = (shopifySummary as any)?.rows || [];
     return { revenue: rows.map((r: any) => r.revenue || 0), orders: rows.map((r: any) => r.orders || 0), aov: rows.map((r: any) => (r.orders > 0 ? r.revenue / r.orders : 0)) };
@@ -596,6 +635,7 @@ export default function Dashboard() {
 
   const effectiveLoading = authLoading ||
     (selectedChannel === 'meta' ? (metaConnected && metaLoading)
+      : selectedChannel === 'google' ? (googleAdsConnected && gadsLoading)
       : selectedChannel === 'shopify' ? (shopifyConnected && shopifyLoading)
       : (gaConnected && isLoading));
   if (effectiveLoading) {
@@ -728,7 +768,10 @@ export default function Dashboard() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-600">
+                <SelectItem value="today">{language === 'tr' ? 'Bugün' : 'Today'}</SelectItem>
+                <SelectItem value="yesterday">{language === 'tr' ? 'Dün' : 'Yesterday'}</SelectItem>
                 <SelectItem value="7d">{t('last7Days')}</SelectItem>
+                <SelectItem value="thisMonth">{language === 'tr' ? 'Bu Ay' : 'This Month'}</SelectItem>
                 <SelectItem value="30d">{t('last30Days')}</SelectItem>
                 <SelectItem value="90d">{t('last90Days')}</SelectItem>
                 <SelectItem value="custom">{t('custom')}</SelectItem>
@@ -756,7 +799,10 @@ export default function Dashboard() {
                 <SelectValue placeholder={language === 'tr' ? 'Karşılaştırma dönemi' : 'Comparison period'} />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-700/40 text-sm">
+                <SelectItem value="today">{language === 'tr' ? 'Önceki Gün' : 'Previous Day'}</SelectItem>
+                <SelectItem value="yesterday">{language === 'tr' ? 'Önceki 2 Gün' : 'Day Before Yesterday'}</SelectItem>
                 <SelectItem value="7d">{language === 'tr' ? 'Önceki 7 Gün' : 'Previous 7 Days'}</SelectItem>
+                <SelectItem value="thisMonth">{language === 'tr' ? 'Önceki Ay' : 'Previous Month'}</SelectItem>
                 <SelectItem value="30d">{language === 'tr' ? 'Önceki 30 Gün' : 'Previous 30 Days'}</SelectItem>
                 <SelectItem value="90d">{language === 'tr' ? 'Önceki 90 Gün' : 'Previous 90 Days'}</SelectItem>
               </SelectContent>
@@ -786,6 +832,20 @@ export default function Dashboard() {
           <CardContent className="p-4 text-amber-200 flex items-center justify-between">
             <div>
               Meta verisi alınamadı. Lütfen Ayarlar'da Meta bağlantınızı yenileyin ve bir reklam hesabı seçin.
+            </div>
+            <Button size="sm" className="ml-3 bg-blue-600 hover:bg-blue-700" onClick={() => (window.location.href = '/settings')}>
+              Settings'e git
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Google Ads warning */}
+      {selectedChannel === 'google' && googleAdsConnected && !gadsLoading && !googleAdsSummary && (
+        <Card className="bg-amber-500/10 border-amber-500/30">
+          <CardContent className="p-4 text-amber-200 flex items-center justify-between">
+            <div>
+              Google Ads verisi alınamadı. Lütfen Ayarlar'da Google Ads bağlantınızı yenileyin ve hesap seçin.
             </div>
             <Button size="sm" className="ml-3 bg-blue-600 hover:bg-blue-700" onClick={() => (window.location.href = '/settings')}>
               Settings'e git
@@ -981,6 +1041,63 @@ export default function Dashboard() {
               </div>
               <p className="text-xl font-bold text-white">{((metaSummary?.totals?.ctr || 0)).toFixed(2)}%</p>
               <Spark series={metaTrend.ctr} color="#F59E0B" />
+            </CardContent>
+          </Card>
+        </div>
+      ) : selectedChannel === 'google' && googleAdsConnected ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('adSpend')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">₺{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(googleAdsSummary?.totals?.spend || 0)}</p>
+              <Spark series={googleAdsTrend.spend} color="#3B82F6" />
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('impressions')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(googleAdsSummary?.totals?.impressions || 0)}</p>
+              <Spark series={googleAdsTrend.impressions} color="#6366F1" />
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('clicks')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(googleAdsSummary?.totals?.clicks || 0)}</p>
+              <Spark series={googleAdsTrend.clicks} color="#10B981" />
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('ctr')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">{((googleAdsSummary?.totals?.ctr || 0)).toFixed(2)}%</p>
+              <Spark series={googleAdsTrend.impressions.map((imp: number, i: number) => { const c = googleAdsTrend.clicks[i] || 0; return imp > 0 ? (c / imp) * 100 : 0; })} color="#F59E0B" />
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('conversions')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">{new Intl.NumberFormat('tr-TR').format(googleAdsSummary?.totals?.conversions || 0)}</p>
+              <Spark series={googleAdsTrend.conversions} color="#22C55E" />
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/80 border-slate-700/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-400 text-sm mb-2">{t('cpc')}</h4>
+              </div>
+              <p className="text-xl font-bold text-white">₺{new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 }).format(googleAdsSummary?.totals?.cpc || 0)}</p>
+              <Spark series={googleAdsTrend.clicks.map((c: number, i: number) => { const s = googleAdsTrend.spend[i] || 0; return c > 0 ? s / c : 0; })} color="#06B6D4" />
             </CardContent>
           </Card>
         </div>

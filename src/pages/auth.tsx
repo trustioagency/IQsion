@@ -64,13 +64,14 @@ export default function Auth() {
       if (!response.ok) {
         throw new Error(result?.message || 'Giriş başarısız.');
       }
-  persistUserUid(result?.uid ?? 'demo-uid-123');
-      setLocation('/');
+      persistUserUid(result?.uid ?? 'demo-uid-123');
+      // Hard redirect to force re-render with new auth state
+      window.location.href = '/dashboard';
     } catch (error) {
       console.error('Login error:', error);
       alert((error instanceof Error ? error.message : 'Giriş başarısız.') + '\nDemo hesabıyla devam ediliyor.');
       persistUserUid('demo-uid-123');
-      setLocation('/');
+      window.location.href = '/dashboard';
     } finally {
       setIsLoading(false);
     }
@@ -102,13 +103,14 @@ export default function Auth() {
       if (!response.ok) {
         throw new Error(result?.message || 'Kayıt başarısız.');
       }
-  persistUserUid(result?.uid ?? 'demo-uid-123');
-      setLocation('/onboarding');
+      persistUserUid(result?.uid ?? 'demo-uid-123');
+      // Hard redirect to force re-render with new auth state
+      window.location.href = '/onboarding';
     } catch (error) {
       console.error('Signup error:', error);
       alert((error instanceof Error ? error.message : 'Kayıt başarısız.') + '\nDemo hesabıyla devam ediliyor.');
       persistUserUid('demo-uid-123');
-      setLocation('/onboarding');
+      window.location.href = '/onboarding';
     } finally {
       setIsLoading(false);
     }

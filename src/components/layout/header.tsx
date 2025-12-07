@@ -63,7 +63,7 @@ export default function Header({ currentPage }: HeaderProps) {
 
 
   return (
-    <header className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700 px-4 py-3">
+    <header className="bg-black border-b border-gray-900 px-4 py-3">
       <div className="flex items-center justify-between">
 
         {/* Left side - Logo, Page title and breadcrumb */}
@@ -80,7 +80,7 @@ export default function Header({ currentPage }: HeaderProps) {
             />
           </button>
           
-          <div className="hidden md:block h-8 w-px bg-slate-600"></div>
+          <div className="hidden md:block h-8 w-px bg-gray-800"></div>
           
           <div>
             <h1 className="text-xl font-bold text-white">{pageTitle}</h1>

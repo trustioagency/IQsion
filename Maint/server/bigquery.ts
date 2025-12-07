@@ -249,6 +249,8 @@ export async function ensureGa4Tables() {
           { name: 'sessions', type: 'INTEGER' },
           { name: 'avgSessionDurationSec', type: 'FLOAT' },
           { name: 'activeUsers', type: 'INTEGER' },
+          { name: 'newUsers', type: 'INTEGER' },
+          { name: 'eventCount', type: 'INTEGER' },
           { name: 'bounceRate', type: 'FLOAT' },
           { name: 'createdAt', type: 'TIMESTAMP' },
         ]
@@ -282,7 +284,7 @@ export async function ensureGa4Tables() {
   return { dataset };
 }
 
-export async function insertGa4Daily(rows: Array<{ userId: string; date: string; propertyId?: string; sessions?: number; avgSessionDurationSec?: number; activeUsers?: number; bounceRate?: number; createdAt?: string }>) {
+export async function insertGa4Daily(rows: Array<{ userId: string; date: string; propertyId?: string; sessions?: number; avgSessionDurationSec?: number; activeUsers?: number; newUsers?: number; eventCount?: number; bounceRate?: number; createdAt?: string }>) {
   const bq = getBigQuery();
   const table = bq.dataset(BQ_DATASET).table('ga4_daily');
   await table.insert(rows.map(r => ({ ...r, createdAt: r.createdAt || new Date().toISOString() })), { ignoreUnknownValues: true, skipInvalidRows: true });

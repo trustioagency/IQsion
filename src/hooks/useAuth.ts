@@ -59,10 +59,10 @@ export function useAuth() {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.removeItem("userUid");
-      window.location.href = "/login";
+      window.location.href = "/auth";
     } catch (error) {
       console.error("Logout hatası:", error);
-      window.location.href = "/login";
+      window.location.href = "/auth";
     }
   };
 

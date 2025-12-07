@@ -1654,11 +1654,41 @@ router.get('/api/googleads/accounts', async (req, res) => {
     const freshConn = freshSnap.val();
     const effectiveAccessToken = freshConn?.accessToken || accessToken;
 
-    // 1) If MCC (loginCustomerId) is provided, prefer GAQL to fetch sub-accounts with names
-    if (loginCustomerId && refreshToken) {
+    // 1) Try to auto-detect MCC if not provided - use REST listAccessibleCustomers
+    let effectiveLoginCustomerId = loginCustomerId;
+    if (!effectiveLoginCustomerId) {
+      try {
+        const tryList = async (version: string) => {
+          const url = `https://googleads.googleapis.com/${version}/customers:listAccessibleCustomers`;
+          const r = await fetch(url, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${effectiveAccessToken}`, 'developer-token': developerToken },
+          });
+          if (!r.ok) throw new Error(`listAccessibleCustomers ${version} failed: ${r.status}`);
+          return (await r.json()) as { resourceNames?: string[] };
+        };
+        const j17 = await tryList('v17');
+        const resourceNames = j17.resourceNames || [];
+        if (resourceNames.length > 0) {
+          // First accessible customer becomes loginCustomerId (usually MCC or primary account)
+          const firstId = String(resourceNames[0]).split('/')[1];
+          if (firstId) {
+            effectiveLoginCustomerId = firstId;
+            // Save it for future use
+            await admin.database().ref(`platformConnections/${userId}/google_ads/loginCustomerId`).set(firstId);
+            console.log(`[GoogleAds MCC Auto-detect] loginCustomerId set to ${firstId}`);
+          }
+        }
+      } catch (e) {
+        console.warn('[GoogleAds MCC Auto-detect] failed:', e);
+      }
+    }
+
+    // 2) If MCC (loginCustomerId) is provided or detected, prefer GAQL to fetch sub-accounts with names
+    if (effectiveLoginCustomerId && refreshToken) {
       try {
         const anyClient: any = client as any;
-        const customer = anyClient.Customer ? anyClient.Customer({ customer_id: loginCustomerId, refresh_token: refreshToken, login_customer_id: loginCustomerId }) : null;
+        const customer = anyClient.Customer ? anyClient.Customer({ customer_id: effectiveLoginCustomerId, refresh_token: refreshToken, login_customer_id: effectiveLoginCustomerId }) : null;
         if (customer && customer.query) {
           const gaql = `SELECT customer_client.id, customer_client.descriptive_name, customer_client.status FROM customer_client WHERE customer_client.manager = false`;
           const rows = await customer.query(gaql);
@@ -1721,7 +1751,7 @@ router.get('/api/googleads/accounts', async (req, res) => {
       try {
         if (refreshToken) {
           const anyClient: any = client as any;
-          const self = anyClient.Customer ? anyClient.Customer({ customer_id: id, refresh_token: refreshToken, login_customer_id: loginCustomerId || undefined }) : null;
+          const self = anyClient.Customer ? anyClient.Customer({ customer_id: id, refresh_token: refreshToken, login_customer_id: effectiveLoginCustomerId || undefined }) : null;
           if (self && self.query) {
             const row = await self.query('SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1');
             const name = Array.isArray(row) && row[0]?.customer?.descriptive_name;
@@ -2350,8 +2380,61 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         if (!accountId) {
           return res.status(400).json({ message: 'Reklam hesabı ID eksik.' });
         }
+        
+        // ADIM 1: Eski hesabın BigQuery verilerini sil
+        try {
+          const bq = getBigQuery();
+          const dataset = process.env.BQ_DATASET || 'iqsion';
+          console.log(`[META ACCOUNT CHANGE] Deleting old account data for ${userId}`);
+          
+          await bq.query({
+            query: `
+              DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+              WHERE userId = @userId AND source = 'meta_ads'
+            `,
+            params: { userId },
+            location: process.env.BQ_LOCATION || 'US',
+          });
+          
+          console.log(`[META ACCOUNT CHANGE] Old data deleted for ${userId}`);
+        } catch (err) {
+          console.error('[META ACCOUNT CHANGE] Failed to delete old data:', err);
+          // Devam et, ingest yine de çalışsın
+        }
+        
+        // ADIM 2: Yeni hesabı Firebase'e kaydet
         await admin.database().ref(`platformConnections/${userId}/meta_ads/accountId`).set(accountId);
-        return res.json({ message: 'Reklam hesabı güncellendi.', accountId });
+        await admin.database().ref(`platformConnections/${userId}/meta_ads/updatedAt`).set(new Date().toISOString());
+        
+        // ADIM 3: Yeni hesap için veri çek
+        try {
+          const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+          if (adminKey) {
+            const ingestBase = buildApiBase(req);
+            const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+            const settings = settingsSnap.val() || {};
+            const ingestDays = Number(settings.initialIngestDays || 30);
+            
+            const today = new Date();
+            const endD = new Date(today); endD.setDate(today.getDate() - 1);
+            const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+            const fmt = (d: Date) => d.toISOString().slice(0, 10);
+            const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+            
+            console.log(`[META ACCOUNT CHANGE] Triggering ingest for ${userId}, new account: ${accountId}`);
+            fetchWithTimeout(`${ingestBase}/api/ingest/meta-ads`, { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, 
+              body 
+            }, 15000).catch((err) => {
+              console.error('[META ACCOUNT CHANGE] Ingest failed:', err);
+            });
+          }
+        } catch (err) {
+          console.error('[META ACCOUNT CHANGE] Error triggering ingest:', err);
+        }
+        
+        return res.json({ message: 'Reklam hesabı güncellendi. Eski veriler silindi, yeni veriler çekiliyor.', accountId });
       }
       // Google Analytics propertyId güncelleme
       if (platform === 'google_analytics') {
@@ -3308,6 +3391,32 @@ router.get('/api/googleads/diagnose', async (req, res) => {
   return settingsRedirect(res, req, 'meta_ads', false);
     }
   });
+  // Admin endpoint: Meta hesap değiştirme
+  router.post('/api/update-meta-account', async (req, res) => {
+    const adminKey = req.headers['x-admin-key'] as string;
+    if (!adminKey || adminKey !== (process.env.ADMIN_API_KEY || '').trim()) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    const { userId, accountId } = req.body;
+    if (!userId || !accountId) {
+      return res.status(400).json({ error: 'userId and accountId required' });
+    }
+    try {
+      const metaRef = admin.database().ref(`platformConnections/${userId}/meta_ads`);
+      const snap = await metaRef.once('value');
+      const existing = snap.val() || {};
+      await metaRef.update({
+        accountId,
+        updatedAt: new Date().toISOString(),
+      });
+      console.log('[ADMIN] Updated Meta account for', userId, 'to', accountId);
+      res.json({ ok: true, accountId });
+    } catch (err: any) {
+      console.error('[ADMIN] Meta account update error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Kullanıcının bağlantı durumlarını döndüren endpoint
   router.get('/api/connections', async (req, res) => {
     try {
@@ -3651,7 +3760,9 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         SELECT date,
                SUM(CAST(sessions AS INT64)) AS sessions,
                AVG(CAST(avgSessionDurationSec AS FLOAT64)) AS avgSessionDurationSec,
-               SUM(CAST(activeUsers AS INT64)) AS activeUsers
+               SUM(CAST(activeUsers AS INT64)) AS activeUsers,
+               SUM(CAST(newUsers AS INT64)) AS newUsers,
+               SUM(CAST(eventCount AS INT64)) AS eventCount
         FROM \`${bq.projectId}.${dataset}.ga4_daily\`
         WHERE userId = @userId AND date BETWEEN @start AND @end
         GROUP BY date
@@ -3672,6 +3783,8 @@ router.get('/api/googleads/diagnose', async (req, res) => {
           sessions: Number(r.sessions || 0),
           avgSessionDurationSec: Number(r.avgSessionDurationSec || 0),
           activeUsers: Number(r.activeUsers || 0),
+          newUsers: Number(r.newUsers || 0),
+          eventCount: Number(r.eventCount || 0),
         };
       }
       const cur = new Date(startISO);
@@ -3679,8 +3792,8 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       const seq: Array<{ date: string; sessions: number; avgSessionDurationSec: number; activeUsers: number }> = [];
       while (cur <= end) {
         const key = cur.toISOString().slice(0,10);
-        const v = map[key] || { sessions: 0, avgSessionDurationSec: 0, activeUsers: 0 };
-        seq.push({ date: key, sessions: v.sessions, avgSessionDurationSec: v.avgSessionDurationSec, activeUsers: v.activeUsers });
+        const v = map[key] || { sessions: 0, avgSessionDurationSec: 0, activeUsers: 0, newUsers: 0, eventCount: 0 };
+        seq.push({ date: key, sessions: v.sessions, avgSessionDurationSec: v.avgSessionDurationSec, activeUsers: v.activeUsers, newUsers: v.newUsers, eventCount: v.eventCount });
         cur.setDate(cur.getDate()+1);
       }
 
@@ -3698,25 +3811,27 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         dimensionValues: [{ value: toYYYYMMDD(r.date) }],
         metricValues: [
           { value: String(r.sessions || 0) },
-          { value: '0' }, // newUsers not available in BQ table
+          { value: String(r.newUsers || 0) },
           { value: String(r.activeUsers || 0) },
           { value: String(r.avgSessionDurationSec || 0) },
-          { value: '0' }, // eventCount not available
+          { value: String(r.eventCount || 0) },
         ]
       }));
       const totalsCalc = seq.reduce((acc, r) => {
         acc.sessions += r.sessions;
         acc.activeUsers += r.activeUsers;
+        acc.newUsers += r.newUsers;
+        acc.eventCount += r.eventCount;
         acc.durationSum += r.avgSessionDurationSec;
         acc.days += 1;
         return acc;
-      }, { sessions: 0, activeUsers: 0, durationSum: 0, days: 0 } as any);
+      }, { sessions: 0, activeUsers: 0, newUsers: 0, eventCount: 0, durationSum: 0, days: 0 } as any);
       const totals = {
         sessions: totalsCalc.sessions,
-        newUsers: 0,
+        newUsers: totalsCalc.newUsers,
         activeUsers: totalsCalc.activeUsers,
         averageSessionDuration: totalsCalc.days ? (totalsCalc.durationSum / totalsCalc.days) : 0,
-        eventCount: 0,
+        eventCount: totalsCalc.eventCount,
       };
 
       return res.json({
@@ -4484,6 +4599,8 @@ router.post('/api/ingest/ga4', async (req, res) => {
         { name: 'sessions' },
         { name: 'averageSessionDuration' },
         { name: 'activeUsers' },
+        { name: 'newUsers' },
+        { name: 'eventCount' },
         { name: 'bounceRate' },
       ],
     };
@@ -4539,7 +4656,9 @@ router.post('/api/ingest/ga4', async (req, res) => {
         sessions: Math.round(m(0, 0)),
         avgSessionDurationSec: m(1, 0),
         activeUsers: Math.round(m(2, 0)),
-        bounceRate: m(3, 0),
+        newUsers: Math.round(m(3, 0)),
+        eventCount: Math.round(m(4, 0)),
+        bounceRate: m(5, 0),
       };
     });
     if (dailyToInsert.length) await insertGa4Daily(dailyToInsert);
@@ -4925,7 +5044,244 @@ router.post('/api/settings', async (req, res) => {
   }
 });
 
-// ===== Daily Auto-Sync for All Connected Users (Cron Job Endpoint) =====
+// ===== Realtime Sync (Her 10 dakikada, sadece bugünü günceller) =====
+router.post('/api/cron/realtime-sync', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  
+  try {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // 23:55-23:59 arası çalışma! Günlük kapanışa bırak
+    if (currentHour === 23 && currentMinute >= 55) {
+      return res.json({
+        success: true,
+        skipped: true,
+        reason: 'Waiting for daily close (23:55-23:59)',
+        timestamp: now.toISOString(),
+      });
+    }
+
+    const allConnsSnap = await admin.database().ref('platformConnections').once('value');
+    const allConns = allConnsSnap.val() || {};
+    
+    const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Bugünün başı
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    
+    for (const [userId, userConns] of Object.entries(allConns)) {
+      const platforms = userConns as Record<string, any>;
+      
+      // Sadece bugünü çek
+      const from = fmt(today);
+      const to = fmt(now);
+      
+      // Meta Ads
+      if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/meta-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'meta_ads', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'meta_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Google Ads
+      if (platforms.google_ads?.isConnected && platforms.google_ads?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/google-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'google_ads', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'google_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Shopify
+      if (platforms.shopify?.isConnected && platforms.shopify?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/shopify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'shopify', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'shopify', status: 'error', error: err.message });
+        }
+      }
+      
+      // GA4
+      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'ga4', status: 'success', inserted: data.inserted || 0 });
+        } catch (err: any) {
+          results.push({ userId, platform: 'ga4', status: 'error', error: err.message });
+        }
+      }
+    }
+    
+    return res.json({ 
+      success: true,
+      type: 'realtime',
+      message: 'Realtime sync completed', 
+      timestamp: now.toISOString(),
+      totalJobs: results.length,
+      successful: results.filter(r => r.status === 'success').length,
+      failed: results.filter(r => r.status === 'error').length,
+      results 
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Realtime sync failed', error: e.message });
+  }
+});
+
+// ===== Daily Close (Her gün 23:59'da, günü kesin kapatır) =====
+router.post('/api/cron/daily-close', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  
+  try {
+    const allConnsSnap = await admin.database().ref('platformConnections').once('value');
+    const allConns = allConnsSnap.val() || {};
+    
+    const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Bugünün başı
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999); // Bugünün sonu
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    
+    for (const [userId, userConns] of Object.entries(allConns)) {
+      const platforms = userConns as Record<string, any>;
+      
+      const from = fmt(today);
+      const to = fmt(endOfDay);
+      
+      // Meta Ads - Günün kesin kapanışı
+      if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/meta-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'meta_ads', status: 'success', inserted: data.inserted || 0 });
+          
+          // Günün kapandığını işaretle
+          await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({
+            lastDayClose: fmt(today),
+            lastSyncAt: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          results.push({ userId, platform: 'meta_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Google Ads
+      if (platforms.google_ads?.isConnected && platforms.google_ads?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/google-ads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'google_ads', status: 'success', inserted: data.inserted || 0 });
+          
+          await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+            lastDayClose: fmt(today),
+            lastSyncAt: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          results.push({ userId, platform: 'google_ads', status: 'error', error: err.message });
+        }
+      }
+      
+      // Shopify
+      if (platforms.shopify?.isConnected && platforms.shopify?.accessToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/shopify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'shopify', status: 'success', inserted: data.inserted || 0 });
+          
+          await admin.database().ref(`platformConnections/${userId}/shopify`).update({
+            lastDayClose: fmt(today),
+            lastSyncAt: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          results.push({ userId, platform: 'shopify', status: 'error', error: err.message });
+        }
+      }
+      
+      // GA4
+      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+        try {
+          const body = JSON.stringify({ userId, from, to });
+          const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
+            body
+          }, 30000);
+          const data = await ingestRes.json();
+          results.push({ userId, platform: 'ga4', status: 'success', inserted: data.inserted || 0 });
+          
+          await admin.database().ref(`platformConnections/${userId}/analytics`).update({
+            lastDayClose: fmt(today),
+            lastSyncAt: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          results.push({ userId, platform: 'ga4', status: 'error', error: err.message });
+        }
+      }
+    }
+    
+    return res.json({ 
+      success: true,
+      type: 'daily_close',
+      message: 'Daily close completed - all days finalized', 
+      timestamp: new Date().toISOString(),
+      closedDate: fmt(today),
+      totalJobs: results.length,
+      successful: results.filter(r => r.status === 'success').length,
+      failed: results.filter(r => r.status === 'error').length,
+      results 
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Daily close failed', error: e.message });
+  }
+});
+
+// ===== Legacy Daily Sync (Eski sistem, şimdilik kalsın) =====
 router.post('/api/cron/daily-sync', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   

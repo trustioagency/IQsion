@@ -1,6 +1,15 @@
 /* Load Tailwind v4 layers */
 @import "tailwindcss";
 
+/* Theme variables */
+html.dark {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+}
+
 html,
 body,
 #root {
@@ -26,6 +35,47 @@ body {
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Override all slate colors to match landing page dark theme (gray-950) */
+html.dark {
+  /* Force all slate tones to pure dark gray-950 */
+  --tw-slate-50: 250 250 250;
+  --tw-slate-100: 241 245 249;
+  --tw-slate-200: 226 232 240;
+  --tw-slate-300: 203 213 225;
+  --tw-slate-400: 148 163 184;
+  --tw-slate-500: 100 116 139;
+  --tw-slate-600: 71 85 105;
+  --tw-slate-700: 23 23 23; /* gray-950 */
+  --tw-slate-800: 10 10 10; /* even darker */
+  --tw-slate-900: 3 7 18; /* darkest */
+}
+
+/* Force card backgrounds to be slightly lighter gray for contrast on black */
+html.dark .bg-slate-800,
+html.dark .bg-slate-800\/80,
+html.dark .bg-slate-800\/50,
+html.dark .bg-slate-800\/60 {
+  background-color: rgb(30 30 30) !important; /* subtle gray on black */
+}
+
+html.dark .border-slate-700,
+html.dark .border-slate-700\/50 {
+  border-color: rgb(45 45 45) !important; /* slightly lighter border */
+}
+
+html.dark .border-slate-600 {
+  border-color: rgb(55 55 55) !important;
+}
+
+/* Fix text colors for better readability on dark */
+html.dark .text-slate-400 {
+  color: rgb(156 163 175) !important; /* gray-400 - more readable */
+}
+
+html.dark .text-slate-500 {
+  color: rgb(115 115 115) !important; /* lighter gray-500 */
 }
 
 :root {
