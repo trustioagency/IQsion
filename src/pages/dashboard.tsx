@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, lazy, Suspense } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -50,10 +50,15 @@ type GaSummary = {
   channelApplied?: string;
 };
 
+// Dashboard verilerinin otomatik yenileme süresi (5 dakika = 300000ms)
+const REFETCH_INTERVAL = 5 * 60 * 1000;
+const STALE_TIME = 2 * 60 * 1000; // 2 dakika sonra stale kabul et
+
 export default function Dashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const { t, language } = useLanguage();
+  const queryClient = useQueryClient();
   const [showStartGuide, setShowStartGuide] = useState(false);
   const [dateRange, setDateRange] = useState<DateRangeKey>('30d');
   const [includeToday, setIncludeToday] = useState<boolean>(false);
@@ -62,6 +67,7 @@ export default function Dashboard() {
   const [selectedChannel, setSelectedChannel] = useState<ChannelKey>('all');
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('revenue');
   const [viewMode, setViewMode] = useState<'default' | 'ceo' | 'cmo'>('default');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   // Pie chart selectors
   const [spendPieMetric, setSpendPieMetric] = useState<'spend'|'impressions'|'clicks'>('spend');
   const [kpiPieMetric, setKpiPieMetric] = useState<'revenue_vs_spend'|'orders_vs_clicks'>('revenue_vs_spend');
@@ -117,22 +123,29 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Helpers: local timezone date formatter (toISOString UTC kullanır, bu bug'a yol açıyordu)
+  const fmtLocalDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   // Helpers: resolve current absolute range and its previous range with equal length
   const getCurrentRangeDates = (key: DateRangeKey) => {
     const today = new Date();
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
     
     if (key === 'today') {
-      return { startDate: fmt(today), endDate: fmt(today), days: 1 };
+      return { startDate: fmtLocalDate(today), endDate: fmtLocalDate(today), days: 1 };
     }
     if (key === 'yesterday') {
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
-      return { startDate: fmt(yesterday), endDate: fmt(yesterday), days: 1 };
+      return { startDate: fmtLocalDate(yesterday), endDate: fmtLocalDate(yesterday), days: 1 };
     }
     if (key === 'thisMonth') {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { startDate: fmt(start), endDate: fmt(today), days: today.getDate() };
+      return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(today), days: today.getDate() };
     }
     
     const end = new Date(today);
@@ -140,30 +153,28 @@ export default function Dashboard() {
     const start = new Date(end);
     const days = key === '7d' ? 7 : key === '30d' ? 30 : key === '90d' ? 90 : 30;
     start.setDate(end.getDate() - (days - 1));
-    return { startDate: fmt(start), endDate: fmt(end), days };
+    return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(end), days };
   };
 
   const getPreviousRangeFrom = (startISO: string, endISO: string) => {
-    const parse = (s: string) => new Date(s + 'T00:00:00Z');
+    const parse = (s: string) => new Date(s + 'T00:00:00');
     const start = parse(startISO);
     const end = parse(endISO);
     const oneDay = 24 * 60 * 60 * 1000;
     const lengthDays = Math.round((end.getTime() - start.getTime()) / oneDay) + 1; // inclusive
     const prevEnd = new Date(start.getTime() - oneDay);
     const prevStart = new Date(prevEnd.getTime() - (lengthDays - 1) * oneDay);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    return { startDate: fmt(prevStart), endDate: fmt(prevEnd), days: lengthDays };
+    return { startDate: fmtLocalDate(prevStart), endDate: fmtLocalDate(prevEnd), days: lengthDays };
   };
 
   // Previous range with explicit length (ends the day before current range start)
   const getPreviousRangeWithLength = (currentStartISO: string, lengthDays: number) => {
-    const parse = (s: string) => new Date(s + 'T00:00:00Z');
+    const parse = (s: string) => new Date(s + 'T00:00:00');
     const oneDay = 24 * 60 * 60 * 1000;
     const currentStart = parse(currentStartISO);
     const prevEnd = new Date(currentStart.getTime() - oneDay);
     const prevStart = new Date(prevEnd.getTime() - (lengthDays - 1) * oneDay);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    return { startDate: fmt(prevStart), endDate: fmt(prevEnd), days: lengthDays };
+    return { startDate: fmtLocalDate(prevStart), endDate: fmtLocalDate(prevEnd), days: lengthDays };
   };
 
   const daysForKey = (key: DateRangeKey) => {
@@ -181,27 +192,27 @@ export default function Dashboard() {
 
   const makeMetaRange = (key: DateRangeKey) => {
     const today = new Date();
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
     
     if (key === 'today') {
-      return { startDate: fmt(today), endDate: fmt(today) };
+      return { startDate: fmtLocalDate(today), endDate: fmtLocalDate(today) };
     }
     if (key === 'yesterday') {
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
-      return { startDate: fmt(yesterday), endDate: fmt(yesterday) };
+      return { startDate: fmtLocalDate(yesterday), endDate: fmtLocalDate(yesterday) };
     }
     if (key === 'thisMonth') {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { startDate: fmt(start), endDate: fmt(today) };
+      return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(today) };
     }
     
+    // 7d, 30d, 90d: includeToday true ise bugünü dahil et
     const end = new Date(today);
-    end.setDate(today.getDate() - 1);
+    if (!includeToday) end.setDate(today.getDate() - 1);
     const start = new Date(end);
     const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 6;
     start.setDate(end.getDate() - days);
-    return { startDate: fmt(start), endDate: fmt(end) };
+    return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(end) };
   };
 
   useEffect(() => {
@@ -213,6 +224,24 @@ export default function Dashboard() {
       }
     }
   }, [user, authLoading, toast, t]);
+
+  // Manuel veri yenileme fonksiyonu
+  const handleRefreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      // Tüm dashboard query'lerini invalidate et
+      await queryClient.invalidateQueries({ queryKey: ['meta-summary'] });
+      await queryClient.invalidateQueries({ queryKey: ['googleads-summary'] });
+      await queryClient.invalidateQueries({ queryKey: ['shopify-summary'] });
+      await queryClient.invalidateQueries({ queryKey: ['ga-summary'] });
+      await queryClient.invalidateQueries({ queryKey: ['profitability'] });
+      toast({ title: t('dataRefreshed') || 'Veriler yenilendi', description: t('dashboardUpdated') || 'Dashboard güncellendi' });
+    } catch (err) {
+      toast({ title: 'Hata', description: 'Veriler yenilenemedi', variant: 'destructive' });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const makeGaRange = (key: DateRangeKey) => {
     switch (key) {
@@ -246,6 +275,8 @@ export default function Dashboard() {
   const { data: gaSummary, isLoading } = useQuery<GaSummary | null>({
     queryKey: ['ga-summary', uid, selectedGaPropertyId, dateRange, selectedChannel],
     enabled: !!user && !!selectedGaPropertyId,
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     queryFn: async () => {
       const { startDate, endDate } = makeGaRange(dateRange);
       const url = new URL('/api/analytics/summary-bq', window.location.origin);
@@ -327,6 +358,8 @@ export default function Dashboard() {
   const { data: metaSummary, isLoading: metaLoading } = useQuery<MetaSummary>({
     queryKey: ['meta-summary', uid, dateRange, viewMode],
     enabled: !!user && metaConnected && (selectedChannel === 'meta' || viewMode === 'cmo'),
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     queryFn: async () => {
       const { startDate, endDate } = makeMetaRange(dateRange);
       const url = new URL('/api/meta/summary-bq', window.location.origin);
@@ -349,6 +382,8 @@ export default function Dashboard() {
   const { data: googleAdsSummary, isLoading: gadsLoading } = useQuery<GoogleAdsSummary>({
     queryKey: ['googleads-summary', uid, dateRange],
     enabled: !!user && googleAdsConnected,
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     queryFn: async () => {
       const { startDate, endDate } = makeMetaRange(dateRange);
       const url = new URL('/api/googleads/summary-bq', window.location.origin);
@@ -422,12 +457,15 @@ export default function Dashboard() {
 
   const makeShopifyRange = (key: DateRangeKey) => {
     const today = new Date();
+    if (key === 'thisMonth') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(today) };
+    }
     const end = new Date(today); if (!includeToday) end.setDate(today.getDate() - 1);
     const start = new Date(end);
     const days = key === '7d' ? 6 : key === '30d' ? 29 : key === '90d' ? 89 : 29;
     start.setDate(end.getDate() - days);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    return { startDate: fmt(start), endDate: fmt(end) };
+    return { startDate: fmtLocalDate(start), endDate: fmtLocalDate(end) };
   };
 
   type ShopifySummary = {
@@ -439,6 +477,8 @@ export default function Dashboard() {
   const { data: shopifySummary, isLoading: shopifyLoading } = useQuery<ShopifySummary>({
     queryKey: ['shopify-summary', uid, dateRange],
     enabled: !!user && shopifyConnected && selectedChannel === 'shopify',
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
     queryFn: async () => {
       const { startDate, endDate } = makeShopifyRange(dateRange);
       const url = new URL('/api/shopify/summary-bq', window.location.origin);
@@ -808,6 +848,20 @@ export default function Dashboard() {
               </SelectContent>
             </Select>
           )}
+
+          {/* Refresh Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefreshData}
+            disabled={isRefreshing}
+            className="h-8 px-2 text-slate-400 hover:text-white hover:bg-slate-700/50"
+            title={language === 'tr' ? 'Verileri Yenile' : 'Refresh Data'}
+          >
+            <svg className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </Button>
         </div>
       </div>
 

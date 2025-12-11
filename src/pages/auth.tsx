@@ -64,14 +64,13 @@ export default function Auth() {
       if (!response.ok) {
         throw new Error(result?.message || 'Giriş başarısız.');
       }
-      persistUserUid(result?.uid ?? 'demo-uid-123');
-      // Hard redirect to force re-render with new auth state
-      window.location.href = '/dashboard';
+  persistUserUid(result?.uid ?? 'demo-uid-123');
+      setLocation('/');
     } catch (error) {
       console.error('Login error:', error);
       alert((error instanceof Error ? error.message : 'Giriş başarısız.') + '\nDemo hesabıyla devam ediliyor.');
       persistUserUid('demo-uid-123');
-      window.location.href = '/dashboard';
+      setLocation('/');
     } finally {
       setIsLoading(false);
     }
@@ -103,57 +102,41 @@ export default function Auth() {
       if (!response.ok) {
         throw new Error(result?.message || 'Kayıt başarısız.');
       }
-      persistUserUid(result?.uid ?? 'demo-uid-123');
-      // Hard redirect to force re-render with new auth state
-      window.location.href = '/onboarding';
+  persistUserUid(result?.uid ?? 'demo-uid-123');
+      setLocation('/onboarding');
     } catch (error) {
       console.error('Signup error:', error);
       alert((error instanceof Error ? error.message : 'Kayıt başarısız.') + '\nDemo hesabıyla devam ediliyor.');
       persistUserUid('demo-uid-123');
-      window.location.href = '/onboarding';
+      setLocation('/onboarding');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Gradient background effects */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-950/20 via-transparent to-blue-900/20"></div>
-      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl"></div>
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-800/10 rounded-full blur-3xl"></div>
-      
-      <div className="w-full max-w-md relative z-10">
-        {/* Logo & Brand */}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <a href="/" className="flex items-center justify-center gap-3 mb-4 hover:opacity-80 transition-opacity cursor-pointer">
-            <img 
-              src="/iqsion.logo.png" 
-              alt="IQsion" 
-              className="w-16 h-16 object-contain mix-blend-lighten drop-shadow-2xl"
-            />
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 bg-clip-text text-transparent">
-              IQsion
-            </h1>
-          </a>
-          <p className="text-gray-400 text-sm">AI-Powered Marketing Intelligence Platform</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Pazar Zekası</h1>
+          <p className="text-gray-600">Pazarlama zekası platformuna hoş geldiniz</p>
         </div>
 
-        <Card className="bg-gray-900/50 border-gray-800 backdrop-blur-xl shadow-2xl shadow-blue-900/20">
-          <CardHeader className="border-b border-gray-800/50">
-            <CardTitle className="text-center text-white text-lg">Hesabınıza Erişin</CardTitle>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-center">Hesabınıza Erişin</CardTitle>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent>
             <Tabs defaultValue="login" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 bg-gray-800/50 p-1">
-                <TabsTrigger value="login" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">Giriş Yap</TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">Hesap Oluştur</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="login">Giriş Yap</TabsTrigger>
+                <TabsTrigger value="signup">Hesap Oluştur</TabsTrigger>
               </TabsList>
 
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="text-gray-300">E-posta</Label>
+                    <Label htmlFor="email">E-posta</Label>
                     <Input
                       id="email"
                       name="email"
@@ -162,12 +145,11 @@ export default function Auth() {
                       value={formData.email}
                       onChange={handleInputChange}
                       required
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="password" className="text-gray-300">Şifre</Label>
+                    <Label htmlFor="password">Şifre</Label>
                     <div className="relative">
                       <Input
                         id="password"
@@ -177,13 +159,12 @@ export default function Auth() {
                         value={formData.password}
                         onChange={handleInputChange}
                         required
-                        className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                       />
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent text-gray-400 hover:text-gray-300"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                         onClick={() => setShowPassword(!showPassword)}
                       >
                         {showPassword ? (
@@ -195,7 +176,7 @@ export default function Auth() {
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white font-semibold shadow-xl shadow-blue-900/40 hover:shadow-2xl hover:shadow-black/50 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]" disabled={isLoading}>
+                  <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -212,7 +193,7 @@ export default function Auth() {
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="firstName" className="text-gray-300">Ad</Label>
+                      <Label htmlFor="firstName">Ad</Label>
                       <Input
                         id="firstName"
                         name="firstName"
@@ -220,11 +201,10 @@ export default function Auth() {
                         value={formData.firstName}
                         onChange={handleInputChange}
                         required
-                        className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="lastName" className="text-gray-300">Soyad</Label>
+                      <Label htmlFor="lastName">Soyad</Label>
                       <Input
                         id="lastName"
                         name="lastName"
@@ -232,13 +212,12 @@ export default function Auth() {
                         value={formData.lastName}
                         onChange={handleInputChange}
                         required
-                        className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="companyName" className="text-gray-300">Şirket Adı</Label>
+                    <Label htmlFor="companyName">Şirket Adı</Label>
                     <Input
                       id="companyName"
                       name="companyName"
@@ -246,12 +225,11 @@ export default function Auth() {
                       value={formData.companyName}
                       onChange={handleInputChange}
                       required
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="signupEmail" className="text-gray-300">E-posta</Label>
+                    <Label htmlFor="signupEmail">E-posta</Label>
                     <Input
                       id="signupEmail"
                       name="email"
@@ -260,12 +238,11 @@ export default function Auth() {
                       value={formData.email}
                       onChange={handleInputChange}
                       required
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="signupPassword" className="text-gray-300">Şifre</Label>
+                    <Label htmlFor="signupPassword">Şifre</Label>
                     <Input
                       id="signupPassword"
                       name="password"
@@ -274,12 +251,11 @@ export default function Auth() {
                       value={formData.password}
                       onChange={handleInputChange}
                       required
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="confirmPassword" className="text-gray-300">Şifre Tekrar</Label>
+                    <Label htmlFor="confirmPassword">Şifre Tekrar</Label>
                     <Input
                       id="confirmPassword"
                       name="confirmPassword"
@@ -288,11 +264,10 @@ export default function Auth() {
                       value={formData.confirmPassword}
                       onChange={handleInputChange}
                       required
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
                     />
                   </div>
 
-                  <Button type="submit" className="w-full bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-900 hover:to-black text-white font-semibold shadow-xl shadow-blue-900/40 hover:shadow-2xl hover:shadow-black/50 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]" disabled={isLoading}>
+                  <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -307,13 +282,6 @@ export default function Auth() {
             </Tabs>
           </CardContent>
         </Card>
-
-        {/* Footer */}
-        <div className="text-center mt-6">
-          <p className="text-gray-500 text-xs">
-            © 2025 IQsion. All rights reserved.
-          </p>
-        </div>
       </div>
     </div>
   );

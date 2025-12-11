@@ -26,6 +26,7 @@ export async function ensureDatasetAndTable(): Promise<{ dataset: Dataset; table
       fields: [
         { name: "userId", type: "STRING", mode: "REQUIRED" },
         { name: "source", type: "STRING", mode: "REQUIRED" },
+        { name: "accountId", type: "STRING" },
         { name: "date", type: "DATE", mode: "REQUIRED" },
         { name: "campaignId", type: "STRING" },
         { name: "adGroupId", type: "STRING" },
@@ -47,11 +48,32 @@ export async function ensureDatasetAndTable(): Promise<{ dataset: Dataset; table
         expirationMs: String(BQ_PARTITION_EXPIRATION_DAYS * 24 * 60 * 60 * 1000),
       },
       clustering: {
-        fields: ["userId", "source"],
+        fields: ["userId", "source", "accountId"],
       },
     };
     await tableRef.create(createConfig);
   } else {
+    // Mevcut tabloda accountId kolonu yoksa ekle
+    try {
+      const [metadata] = await tableRef.getMetadata();
+      const existingFields = metadata?.schema?.fields || [];
+      const hasAccountId = existingFields.some((f: any) => f.name === 'accountId');
+      
+      if (!hasAccountId) {
+        console.log('[BigQuery] Adding accountId column to existing table...');
+        const newSchema = {
+          fields: [
+            ...existingFields,
+            { name: "accountId", type: "STRING", mode: "NULLABLE" }
+          ]
+        };
+        await tableRef.setMetadata({ schema: newSchema } as any);
+        console.log('[BigQuery] accountId column added successfully');
+      }
+    } catch (schemaErr) {
+      console.error('[BigQuery] Failed to add accountId column:', schemaErr);
+    }
+    
     // Mevcut tabloda TTL yoksa, varsayılan TTL uygula (global üst sınır)
     try {
       const [metadata] = await tableRef.getMetadata();
@@ -75,6 +97,7 @@ export async function ensureDatasetAndTable(): Promise<{ dataset: Dataset; table
 export type MetricsRow = {
   userId: string;
   source: string;
+  accountId?: string;
   date: string; // YYYY-MM-DD
   campaignId?: string;
   adGroupId?: string;
@@ -93,7 +116,7 @@ export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: num
   const bq = getBigQuery();
   await ensureDatasetAndTable();
   
-  // GROUP rows by (userId, source) to minimize DELETE queries
+  // GROUP rows by (userId, source) to minimize queries
   const grouped = new Map<string, MetricsRow[]>();
   for (const r of rows) {
     const key = `${r.userId}|||${r.source}`;
@@ -103,38 +126,17 @@ export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: num
 
   let totalInserted = 0;
 
-  for (const [key, groupRows] of grouped.entries()) {
-    const [userId, source] = key.split('|||');
-    const dates = groupRows.map(r => r.date);
-    const minDate = dates.sort()[0];
-    const maxDate = dates.sort().reverse()[0];
-
-    // STEP 1: DELETE existing rows for this userId+source+date range (NO streaming buffer conflict)
-    const deleteSql = `
-      DELETE FROM \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
-      WHERE userId = @userId AND source = @source AND date >= DATE(@minDate) AND date <= DATE(@maxDate)
-    `;
-    try {
-      const [deleteJob] = await bq.createQueryJob({
-        query: deleteSql,
-        params: { userId, source, minDate, maxDate },
-        location: BQ_LOCATION,
-      });
-      await deleteJob.getQueryResults();
-    } catch (err) {
-      console.error(`[BigQuery] DELETE failed for ${userId}/${source}:`, err);
-      // Continue anyway, INSERT will create duplicates but better than failing
-    }
-
-    // STEP 2: INSERT new rows
-    const payload = groupRows.map(r => ({
+  for (const [key, groupRows] of Array.from(grouped.entries())) {
+    const now = new Date().toISOString();
+    const payload = groupRows.map((r: MetricsRow) => ({
       ...r,
-      createdAt: r.createdAt || new Date().toISOString(),
+      createdAt: r.createdAt || now,
     }));
 
-    const values = payload.map(r => {
+    const values = payload.map((r: MetricsRow & { createdAt: string }) => {
       const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
       const sourceEsc = String(r.source || '').replace(/'/g, "\\'");
+      const accountId = r.accountId ? `'${String(r.accountId).replace(/'/g, "\\'")}'` : 'NULL';
       const date = String(r.date || '1970-01-01');
       const campaignId = r.campaignId ? `'${String(r.campaignId).replace(/'/g, "\\'")}'` : 'NULL';
       const adGroupId = r.adGroupId ? `'${String(r.adGroupId).replace(/'/g, "\\'")}'` : 'NULL';
@@ -145,20 +147,43 @@ export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: num
       const transactions = r.transactions ?? 'NULL';
       const revenueMicros = r.revenueMicros ?? 'NULL';
       const createdAt = `TIMESTAMP('${r.createdAt}')`;
-      return `('${userIdEsc}', '${sourceEsc}', DATE('${date}'), ${campaignId}, ${adGroupId}, ${impressions}, ${clicks}, ${costMicros}, ${sessions}, ${transactions}, ${revenueMicros}, ${createdAt})`;
+      return `('${userIdEsc}', '${sourceEsc}', ${accountId}, DATE('${date}'), ${campaignId}, ${adGroupId}, ${impressions}, ${clicks}, ${costMicros}, ${sessions}, ${transactions}, ${revenueMicros}, ${createdAt})`;
     }).join(',\n      ');
 
-    const insertSql = `
-      INSERT INTO \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\`
-      (userId, source, date, campaignId, adGroupId, impressions, clicks, costMicros, sessions, transactions, revenueMicros, createdAt)
-      VALUES ${values}
+    // Use MERGE INTO to prevent duplicates atomically
+    const mergeSql = `
+      MERGE INTO \`${bq.projectId}.${BQ_DATASET}.${BQ_TABLE}\` AS target
+      USING (
+        SELECT * FROM UNNEST([
+          STRUCT<userId STRING, source STRING, accountId STRING, date DATE, campaignId STRING, adGroupId STRING, impressions INT64, clicks INT64, costMicros INT64, sessions INT64, transactions INT64, revenueMicros INT64, createdAt TIMESTAMP>
+          ${values}
+        ])
+      ) AS source
+      ON target.userId = source.userId 
+         AND target.source = source.source 
+         AND target.date = source.date
+         AND (target.campaignId IS NULL AND source.campaignId IS NULL OR target.campaignId = source.campaignId)
+         AND (target.adGroupId IS NULL AND source.adGroupId IS NULL OR target.adGroupId = source.adGroupId)
+      WHEN MATCHED THEN
+        UPDATE SET
+          accountId = source.accountId,
+          impressions = source.impressions,
+          clicks = source.clicks,
+          costMicros = source.costMicros,
+          sessions = source.sessions,
+          transactions = source.transactions,
+          revenueMicros = source.revenueMicros,
+          createdAt = source.createdAt
+      WHEN NOT MATCHED THEN
+        INSERT (userId, source, accountId, date, campaignId, adGroupId, impressions, clicks, costMicros, sessions, transactions, revenueMicros, createdAt)
+        VALUES (source.userId, source.source, source.accountId, source.date, source.campaignId, source.adGroupId, source.impressions, source.clicks, source.costMicros, source.sessions, source.transactions, source.revenueMicros, source.createdAt)
     `;
 
-    const [insertJob] = await bq.createQueryJob({
-      query: insertSql,
+    const [job] = await bq.createQueryJob({
+      query: mergeSql,
       location: BQ_LOCATION,
     });
-    await insertJob.getQueryResults();
+    await job.getQueryResults();
     totalInserted += payload.length;
   }
 
@@ -285,15 +310,105 @@ export async function ensureGa4Tables() {
 }
 
 export async function insertGa4Daily(rows: Array<{ userId: string; date: string; propertyId?: string; sessions?: number; avgSessionDurationSec?: number; activeUsers?: number; newUsers?: number; eventCount?: number; bounceRate?: number; createdAt?: string }>) {
+  if (!rows.length) return { inserted: 0 };
+  
   const bq = getBigQuery();
-  const table = bq.dataset(BQ_DATASET).table('ga4_daily');
-  await table.insert(rows.map(r => ({ ...r, createdAt: r.createdAt || new Date().toISOString() })), { ignoreUnknownValues: true, skipInvalidRows: true });
+  const now = new Date().toISOString();
+  
+  // Use MERGE INTO to prevent duplicates atomically
+  const values = rows.map(r => {
+    const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
+    const date = String(r.date || '1970-01-01');
+    const propertyId = r.propertyId ? `'${String(r.propertyId).replace(/'/g, "\\'")}'` : 'NULL';
+    const sessions = r.sessions ?? 'NULL';
+    const avgSessionDurationSec = r.avgSessionDurationSec ?? 'NULL';
+    const activeUsers = r.activeUsers ?? 'NULL';
+    const newUsers = r.newUsers ?? 'NULL';
+    const eventCount = r.eventCount ?? 'NULL';
+    const bounceRate = r.bounceRate ?? 'NULL';
+    const createdAt = `TIMESTAMP('${r.createdAt || now}')`;
+    return `('${userIdEsc}', DATE('${date}'), ${propertyId}, ${sessions}, ${avgSessionDurationSec}, ${activeUsers}, ${newUsers}, ${eventCount}, ${bounceRate}, ${createdAt})`;
+  }).join(',\n      ');
+  
+  const mergeSql = `
+    MERGE INTO \`${bq.projectId}.${BQ_DATASET}.ga4_daily\` AS target
+    USING (
+      SELECT * FROM UNNEST([
+        STRUCT<userId STRING, date DATE, propertyId STRING, sessions INT64, avgSessionDurationSec FLOAT64, activeUsers INT64, newUsers INT64, eventCount INT64, bounceRate FLOAT64, createdAt TIMESTAMP>
+        ${values}
+      ])
+    ) AS source
+    ON target.userId = source.userId 
+       AND target.date = source.date 
+       AND (target.propertyId IS NULL AND source.propertyId IS NULL OR target.propertyId = source.propertyId)
+    WHEN MATCHED THEN
+      UPDATE SET
+        sessions = source.sessions,
+        avgSessionDurationSec = source.avgSessionDurationSec,
+        activeUsers = source.activeUsers,
+        newUsers = source.newUsers,
+        eventCount = source.eventCount,
+        bounceRate = source.bounceRate,
+        createdAt = source.createdAt
+    WHEN NOT MATCHED THEN
+      INSERT (userId, date, propertyId, sessions, avgSessionDurationSec, activeUsers, newUsers, eventCount, bounceRate, createdAt)
+      VALUES (source.userId, source.date, source.propertyId, source.sessions, source.avgSessionDurationSec, source.activeUsers, source.newUsers, source.eventCount, source.bounceRate, source.createdAt)
+  `;
+  
+  const [job] = await bq.createQueryJob({
+    query: mergeSql,
+    location: BQ_LOCATION,
+  });
+  await job.getQueryResults();
+  
   return { inserted: rows.length };
 }
 
 export async function insertGa4GeoDaily(rows: Array<{ userId: string; date: string; propertyId?: string; region?: string; sessions?: number; activeUsers?: number; createdAt?: string }>) {
+  if (!rows.length) return { inserted: 0 };
+  
   const bq = getBigQuery();
-  const table = bq.dataset(BQ_DATASET).table('ga4_geo_daily');
-  await table.insert(rows.map(r => ({ ...r, createdAt: r.createdAt || new Date().toISOString() })), { ignoreUnknownValues: true, skipInvalidRows: true });
+  const now = new Date().toISOString();
+  
+  // Use MERGE INTO to prevent duplicates atomically
+  const values = rows.map(r => {
+    const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
+    const date = String(r.date || '1970-01-01');
+    const propertyId = r.propertyId ? `'${String(r.propertyId).replace(/'/g, "\\'")}'` : 'NULL';
+    const region = r.region ? `'${String(r.region).replace(/'/g, "\\'")}'` : 'NULL';
+    const sessions = r.sessions ?? 'NULL';
+    const activeUsers = r.activeUsers ?? 'NULL';
+    const createdAt = `TIMESTAMP('${r.createdAt || now}')`;
+    return `('${userIdEsc}', DATE('${date}'), ${propertyId}, ${region}, ${sessions}, ${activeUsers}, ${createdAt})`;
+  }).join(',\n      ');
+  
+  const mergeSql = `
+    MERGE INTO \`${bq.projectId}.${BQ_DATASET}.ga4_geo_daily\` AS target
+    USING (
+      SELECT * FROM UNNEST([
+        STRUCT<userId STRING, date DATE, propertyId STRING, region STRING, sessions INT64, activeUsers INT64, createdAt TIMESTAMP>
+        ${values}
+      ])
+    ) AS source
+    ON target.userId = source.userId 
+       AND target.date = source.date 
+       AND (target.propertyId IS NULL AND source.propertyId IS NULL OR target.propertyId = source.propertyId)
+       AND (target.region IS NULL AND source.region IS NULL OR target.region = source.region)
+    WHEN MATCHED THEN
+      UPDATE SET
+        sessions = source.sessions,
+        activeUsers = source.activeUsers,
+        createdAt = source.createdAt
+    WHEN NOT MATCHED THEN
+      INSERT (userId, date, propertyId, region, sessions, activeUsers, createdAt)
+      VALUES (source.userId, source.date, source.propertyId, source.region, source.sessions, source.activeUsers, source.createdAt)
+  `;
+  
+  const [job] = await bq.createQueryJob({
+    query: mergeSql,
+    location: BQ_LOCATION,
+  });
+  await job.getQueryResults();
+  
   return { inserted: rows.length };
 }

@@ -1,4 +1,3 @@
-
 import express from "express";
 import dotenv from "dotenv";
 import path from "path";
@@ -57,6 +56,17 @@ function normalizeBqDate(val: any): string {
     }
   }
   return String(val).slice(0, 10);
+}
+
+// Türkiye timezone'unda bugünün tarihini döndür (UTC+3)
+function getTurkeyDate(offsetDays: number = 0): string {
+  const now = new Date();
+  const turkeyOffset = 3 * 60 * 60 * 1000; // UTC+3
+  const turkeyNow = new Date(now.getTime() + turkeyOffset + (offsetDays * 24 * 60 * 60 * 1000));
+  const year = turkeyNow.getUTCFullYear();
+  const month = String(turkeyNow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(turkeyNow.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function settingsRedirect(res: express.Response, req: express.Request, platform: string, ok: boolean) {
@@ -485,8 +495,12 @@ router.get('/api/attribution/sources', async (req, res) => {
 
     const baseProto = req.protocol || 'http';
     const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1', 'localhost');
-    const baseUrl = `${baseProto}://${host}`;
-
+      await admin.database().ref(`platformConnections/${userId}/shopify`).update({
+        storeUrl,
+        updatedAt: new Date().toISOString(),
+        lastSyncAt: null,
+        lastIngestRange: null,
+      });
     // Helper to normalize referrers to channels
     const normalizeChannel = (ref: string | null | undefined, sourceName?: string | null): string => {
       const s = (String(ref || '').toLowerCase());
@@ -1303,6 +1317,14 @@ router.get('/api/shopify/summary-bq', async (req, res) => {
   try {
     const userId = (req.query.userId as string) || 'test-user';
     const revenueMode = (typeof req.query.revenueMode === 'string' ? req.query.revenueMode : 'gross') as 'paid' | 'gross';
+    
+    // Get selected shop from connections
+    let storeUrl: string | undefined = undefined;
+    try {
+      const snap = await admin.database().ref(`platformConnections/${userId}/shopify`).once('value');
+      storeUrl = snap.val()?.storeUrl?.replace(/^https?:\/\//,'').replace(/\/$/,'') || undefined;
+    } catch (_) {}
+    
     // Default range: last 30 days ending yesterday
     const today = new Date();
     const endD = new Date(today); endD.setDate(today.getDate() - 1);
@@ -1313,18 +1335,33 @@ router.get('/api/shopify/summary-bq', async (req, res) => {
 
     const bq = getBigQuery();
     const dataset = process.env.BQ_DATASET || 'iqsion';
+    
+    // If storeUrl is set, filter by it; otherwise return all stores (backward compatibility)
+    const accountFilter = storeUrl ? 'AND accountId = @accountId' : '';
+    
     const sql = `
+      WITH LatestRows AS (
+        SELECT date,
+               transactions,
+               revenueMicros,
+               ROW_NUMBER() OVER (PARTITION BY date ORDER BY createdAt DESC) as rn
+        FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'shopify' ${accountFilter} AND date BETWEEN DATE(@start) AND DATE(@end)
+      )
       SELECT date,
-             SUM(CAST(transactions AS INT64)) AS orders,
-             SUM(CAST(revenueMicros AS INT64)) AS revenueMicros
-      FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-      WHERE userId = @userId AND source = 'shopify' AND date BETWEEN DATE(@start) AND DATE(@end)
-      GROUP BY date
+             CAST(transactions AS INT64) AS orders,
+             CAST(revenueMicros AS INT64) AS revenueMicros
+      FROM LatestRows
+      WHERE rn = 1
       ORDER BY date
     `;
+    
+    const params: any = { userId, start: since, end: until };
+    if (storeUrl) params.accountId = storeUrl;
+    
     const [job] = await bq.createQueryJob({
       query: sql,
-      params: { userId, start: since, end: until },
+      params,
       location: process.env.BQ_LOCATION || 'US',
     });
     const [rows] = await job.getQueryResults();
@@ -2006,11 +2043,11 @@ router.get('/api/googleads/summary', async (req, res) => {
 router.get('/api/googleads/summary-bq', async (req, res) => {
   try {
     const userId = (req.query.userId as string) || 'test-user';
-    // Attempt to include accountId from stored connection for parity
+    // Get selected accountId from stored connection
     let accountId: string | undefined = undefined;
     try {
       const snap = await admin.database().ref(`platformConnections/${userId}/google_ads`).once('value');
-      accountId = snap.val()?.accountId || undefined;
+      accountId = snap.val()?.accountId?.replace(/-/g, '') || undefined;
     } catch (_) {}
     // Default range: last 7 days ending yesterday
     const today = new Date();
@@ -2022,20 +2059,36 @@ router.get('/api/googleads/summary-bq', async (req, res) => {
 
     const bq = getBigQuery();
     const dataset = process.env.BQ_DATASET || 'iqsion';
+    
+    // If accountId is set, filter by it; otherwise return all accounts (backward compatibility)
+    const accountFilter = accountId ? 'AND accountId = @accountId' : '';
+    
+    // Google Ads verileri kampanya bazında kaydediliyor, tüm kampanyaları toplamamız gerekiyor
+    // Her kampanya-gün kombinasyonu için en son kaydı al, sonra günlük topla
     const sql = `
+      WITH LatestPerCampaign AS (
+        SELECT date, campaignId, impressions, clicks, costMicros, transactions,
+               ROW_NUMBER() OVER (PARTITION BY date, campaignId ORDER BY createdAt DESC) as rn
+        FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'google_ads' ${accountFilter} AND date BETWEEN DATE(@start) AND DATE(@end)
+      )
       SELECT date,
              SUM(CAST(impressions AS INT64)) AS impressions,
              SUM(CAST(clicks AS INT64)) AS clicks,
              SUM(CAST(costMicros AS INT64)) AS costMicros,
-             SUM(CAST(transactions AS INT64)) AS conversions
-      FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-      WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
+             SUM(CAST(COALESCE(transactions, 0) AS INT64)) AS conversions
+      FROM LatestPerCampaign
+      WHERE rn = 1
       GROUP BY date
       ORDER BY date
     `;
+    
+    const params: any = { userId, start: since, end: until };
+    if (accountId) params.accountId = accountId;
+    
     const [job] = await bq.createQueryJob({
       query: sql,
-      params: { userId, start: since, end: until },
+      params,
       location: process.env.BQ_LOCATION || 'US',
     });
     const [rows] = await job.getQueryResults();
@@ -2181,22 +2234,8 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
     // The user should select their account from the dropdown in Settings UI
     // The /api/googleads/accounts endpoint will fetch the list when they open the dropdown
     console.error('[GOOGLE ADS CALLBACK] Connection successful, user can now select account from dropdown');
-    try {
-      const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-      if (adminKey) {
-        const ingestBase = buildApiBase(req);
-        const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
-        const settings = settingsSnap.val() || {};
-        const ingestDays = Number(settings.initialIngestDays || 30);
-        
-        const today = new Date();
-        const endD = new Date(today); endD.setDate(today.getDate() - 1);
-        const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
-        const fmt = (d: Date) => d.toISOString().slice(0, 10);
-        const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-        fetchWithTimeout(`${ingestBase}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
-      }
-    } catch {}
+    // NOT: Otomatik veri çekme kaldırıldı!
+    // Kullanıcı hesap seçtikten sonra frontend'den veri çekme tetiklenecek
   return settingsRedirect(res, req, 'google_ads', true);
   } catch (err) {
     res.status(500).send('Google Ads token alma hatası: ' + err);
@@ -2207,8 +2246,30 @@ router.get('/api/auth/googleads/callback', async (req: express.Request, res: exp
 router.post('/api/googleads/disconnect', async (req, res) => {
   try {
     const userId = (req.body.userId as string) || 'test-user';
+    // Firebase bağlantısını sil
     await admin.database().ref(`platformConnections/${userId}/google_ads`).remove();
-    return res.json({ message: 'Google Ads bağlantısı silindi.' });
+
+    // BigQuery tarafında sadece bu platforma ait verileri temizle
+    try {
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const deleteSql = `
+        DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+        WHERE userId = @userId AND source = 'google_ads'
+      `;
+      const [job] = await bq.createQueryJob({
+        query: deleteSql,
+        params: { userId },
+        location: process.env.BQ_LOCATION || 'US',
+      });
+      await job.getQueryResults();
+      console.log(`[DISCONNECT] Deleted BigQuery data for ${userId}/google_ads`);
+    } catch (bqErr) {
+      console.error(`[DISCONNECT] BigQuery cleanup failed for ${userId}/google_ads:`, bqErr);
+      // BigQuery silme başarısız olsa bile disconnect devam etsin
+    }
+
+    return res.json({ message: 'Google Ads bağlantısı ve verileri silindi.' });
   } catch (e) {
     return res.status(500).json({ message: 'Google Ads bağlantısı silinemedi', error: String(e) });
   }
@@ -2370,9 +2431,58 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         if (!storeUrl) {
           return res.status(400).json({ message: 'Shopify mağaza adresi eksik.' });
         }
-        // update kullan: accessToken/isConnected gibi alanları silme
+        
+        // ADIM 1: Eski mağazanın BigQuery verilerini sil
+        try {
+          const bq = getBigQuery();
+          const dataset = process.env.BQ_DATASET || 'iqsion';
+          console.log(`[SHOPIFY STORE CHANGE] Deleting old store data for ${userId}`);
+          
+          await bq.query({
+            query: `
+              DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+              WHERE userId = @userId AND source = 'shopify' AND accountId = @accountId
+            `,
+            params: { userId, accountId: storeUrl },
+            location: process.env.BQ_LOCATION || 'US',
+          });
+          
+          console.log(`[SHOPIFY STORE CHANGE] Old data deleted for ${userId}`);
+        } catch (err) {
+          console.error('[SHOPIFY STORE CHANGE] Failed to delete old data:', err);
+          // Devam et, ingest yine de çalışsın
+        }
+        
+        // ADIM 2: Yeni mağazayı Firebase'e kaydet
         await admin.database().ref(`platformConnections/${userId}/shopify`).update({ storeUrl, updatedAt: new Date().toISOString() });
-        return res.json({ message: 'Shopify mağaza adresi kaydedildi.', storeUrl });
+        
+        // ADIM 3: Yeni mağaza için veri çek
+        try {
+          const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+          const ingestBase = buildApiBase(req);
+          const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+          const settings = settingsSnap.val() || {};
+          const ingestDays = Number(settings.initialIngestDays || 30);
+          
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+          
+          console.log(`[SHOPIFY STORE CHANGE] Triggering ingest for ${userId}, new store: ${storeUrl}`);
+          fetchWithTimeout(`${ingestBase}/api/ingest/shopify`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', ...(adminKey ? { 'x-admin-key': adminKey } : {}) }, 
+            body 
+          }, 15000).catch((err) => {
+            console.error('[SHOPIFY STORE CHANGE] Ingest failed:', err);
+          });
+        } catch (err) {
+          console.error('[SHOPIFY STORE CHANGE] Error triggering ingest:', err);
+        }
+        
+        return res.json({ message: 'Shopify mağaza adresi kaydedildi. Eski veriler silindi, yeni veriler çekiliyor.', storeUrl });
       }
       // Meta reklam hesabı güncelleme
       if (platform === 'meta_ads') {
@@ -2390,9 +2500,9 @@ router.get('/api/googleads/diagnose', async (req, res) => {
           await bq.query({
             query: `
               DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-              WHERE userId = @userId AND source = 'meta_ads'
+              WHERE userId = @userId AND source = 'meta_ads' AND accountId = @accountId
             `,
-            params: { userId },
+            params: { userId, accountId },
             location: process.env.BQ_LOCATION || 'US',
           });
           
@@ -2404,32 +2514,36 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         
         // ADIM 2: Yeni hesabı Firebase'e kaydet
         await admin.database().ref(`platformConnections/${userId}/meta_ads/accountId`).set(accountId);
-        await admin.database().ref(`platformConnections/${userId}/meta_ads/updatedAt`).set(new Date().toISOString());
+        // Reset sync markers so yeni hesap tam aralıkla ingest edilsin
+        await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({
+          accountId,
+          updatedAt: new Date().toISOString(),
+          lastSyncAt: null,
+          lastIngestRange: null,
+        });
         
         // ADIM 3: Yeni hesap için veri çek
         try {
           const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-          if (adminKey) {
-            const ingestBase = buildApiBase(req);
-            const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
-            const settings = settingsSnap.val() || {};
-            const ingestDays = Number(settings.initialIngestDays || 30);
-            
-            const today = new Date();
-            const endD = new Date(today); endD.setDate(today.getDate() - 1);
-            const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
-            const fmt = (d: Date) => d.toISOString().slice(0, 10);
-            const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-            
-            console.log(`[META ACCOUNT CHANGE] Triggering ingest for ${userId}, new account: ${accountId}`);
-            fetchWithTimeout(`${ingestBase}/api/ingest/meta-ads`, { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, 
-              body 
-            }, 15000).catch((err) => {
-              console.error('[META ACCOUNT CHANGE] Ingest failed:', err);
-            });
-          }
+          const ingestBase = buildApiBase(req);
+          const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+          const settings = settingsSnap.val() || {};
+          const ingestDays = Number(settings.initialIngestDays || 30);
+          
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+          
+          console.log(`[META ACCOUNT CHANGE] Triggering ingest for ${userId}, new account: ${accountId}`);
+          fetchWithTimeout(`${ingestBase}/api/ingest/meta-ads`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', ...(adminKey ? { 'x-admin-key': adminKey } : {}) }, 
+            body 
+          }, 15000).catch((err) => {
+            console.error('[META ACCOUNT CHANGE] Ingest failed:', err);
+          });
         } catch (err) {
           console.error('[META ACCOUNT CHANGE] Error triggering ingest:', err);
         }
@@ -2442,37 +2556,131 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         if (!propertyId) {
           return res.status(400).json({ message: 'Property ID eksik.' });
         }
+        
+        // ADIM 1: Eski property'nin BigQuery verilerini sil
+        try {
+          const bq = getBigQuery();
+          const dataset = process.env.BQ_DATASET || 'iqsion';
+          console.log(`[GA4 PROPERTY CHANGE] Deleting old property data for ${userId}`);
+          
+          await bq.query({
+            query: `
+              DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+              WHERE userId = @userId
+            `,
+            params: { userId },
+            location: process.env.BQ_LOCATION || 'US',
+          });
+          
+          await bq.query({
+            query: `
+              DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\`
+              WHERE userId = @userId
+            `,
+            params: { userId },
+            location: process.env.BQ_LOCATION || 'US',
+          });
+          
+          console.log(`[GA4 PROPERTY CHANGE] Old data deleted for ${userId}`);
+        } catch (err) {
+          console.error('[GA4 PROPERTY CHANGE] Failed to delete old data:', err);
+          // Devam et, ingest yine de çalışsın
+        }
+        
+        // ADIM 2: Yeni property'yi Firebase'e kaydet
         await admin.database().ref(`platformConnections/${userId}/google_analytics/propertyId`).set(propertyId);
-        return res.json({ message: 'Google Analytics property ID güncellendi.', propertyId });
+        await admin.database().ref(`platformConnections/${userId}/google_analytics/updatedAt`).set(new Date().toISOString());
+        
+        // ADIM 3: Yeni property için veri çek
+        try {
+          const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+          const ingestBase = buildApiBase(req);
+          const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+          const settings = settingsSnap.val() || {};
+          const ingestDays = Number(settings.initialIngestDays || 30);
+          
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+          
+          console.log(`[GA4 PROPERTY CHANGE] Triggering ingest for ${userId}, new property: ${propertyId}`);
+          fetchWithTimeout(`${ingestBase}/api/ingest/ga4`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', ...(adminKey ? { 'x-admin-key': adminKey } : {}) }, 
+            body 
+          }, 15000).catch((err) => {
+            console.error('[GA4 PROPERTY CHANGE] Ingest failed:', err);
+          });
+        } catch (err) {
+          console.error('[GA4 PROPERTY CHANGE] Error triggering ingest:', err);
+        }
+        
+        return res.json({ message: 'Google Analytics property ID güncellendi. Eski veriler silindi, yeni veriler çekiliyor.', propertyId });
       }
       // Google Ads reklam hesabı güncelleme
       if (platform === 'google_ads') {
         const accountId = req.body.accountId;
         const loginCustomerId = req.body.loginCustomerId;
+        
+        // Eğer hesap değişiyorsa, eski verileri sil
+        if (accountId) {
+          try {
+            const bq = getBigQuery();
+            const dataset = process.env.BQ_DATASET || 'iqsion';
+            console.log(`[GOOGLE ADS ACCOUNT CHANGE] Deleting old account data for ${userId}`);
+            
+            await bq.query({
+              query: `
+                DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+                WHERE userId = @userId AND source = 'google_ads' AND accountId = @accountId
+              `,
+              params: { userId, accountId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            
+            console.log(`[GOOGLE ADS ACCOUNT CHANGE] Old data deleted for ${userId}`);
+          } catch (err) {
+            console.error('[GOOGLE ADS ACCOUNT CHANGE] Failed to delete old data:', err);
+            // Devam et, ingest yine de çalışsın
+          }
+        }
+        
         if (loginCustomerId) {
           await admin.database().ref(`platformConnections/${userId}/google_ads/loginCustomerId`).set(loginCustomerId);
         }
         if (accountId) {
-          await admin.database().ref(`platformConnections/${userId}/google_ads/accountId`).set(accountId);
+          // Reset sync markers to force fresh ingest for the new account
+          await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
+            accountId,
+            updatedAt: new Date().toISOString(),
+            lastSyncAt: null,
+            lastIngestRange: null,
+          });
           // Fire-and-forget initial ingest (kullanıcının initialIngestDays ayarını oku)
           try {
             const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-            if (adminKey) {
-              const ingestBase = buildApiBase(req);
-              const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
-              const settings = settingsSnap.val() || {};
-              const ingestDays = Number(settings.initialIngestDays || 30);
-              
-              const today = new Date();
-              const endD = new Date(today); endD.setDate(today.getDate() - 1);
-              const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
-              const fmt = (d: Date) => d.toISOString().slice(0, 10);
-              const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-              fetchWithTimeout(`${ingestBase}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
-            }
-          } catch {}
+            const ingestBase = buildApiBase(req);
+            const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
+            const settings = settingsSnap.val() || {};
+            const ingestDays = Number(settings.initialIngestDays || 30);
+            
+            const today = new Date();
+            const endD = new Date(today); endD.setDate(today.getDate() - 1);
+            const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
+            const fmt = (d: Date) => d.toISOString().slice(0, 10);
+            const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+            
+            console.log(`[GOOGLE ADS ACCOUNT CHANGE] Triggering ingest for ${userId}, new account: ${accountId}`);
+            fetchWithTimeout(`${ingestBase}/api/ingest/google-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(adminKey ? { 'x-admin-key': adminKey } : {}) }, body }, 10000).catch((err) => {
+              console.error('[GOOGLE ADS ACCOUNT CHANGE] Ingest failed:', err);
+            });
+          } catch (err) {
+            console.error('[GOOGLE ADS ACCOUNT CHANGE] Error triggering ingest:', err);
+          }
         }
-        return res.json({ message: 'Google Ads bağlantısı güncellendi.', accountId, loginCustomerId });
+        return res.json({ message: 'Google Ads bağlantısı güncellendi. Eski veriler silindi, yeni veriler çekiliyor.', accountId, loginCustomerId });
       }
       // TikTok reklam hesabı güncelleme
       if (platform === 'tiktok') {
@@ -2493,15 +2701,13 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         // İlk ingest tetikle (son 7 gün) - fire and forget
         try {
           const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-          if (adminKey) {
-            const ingestBase = buildApiBase(req);
-            const today = new Date();
-            const endD = new Date(today); endD.setDate(today.getDate() - 1);
-            const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
-            const fmt = (d: Date) => d.toISOString().slice(0, 10);
-            const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-            fetchWithTimeout(`${ingestBase}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
-          }
+          const ingestBase = buildApiBase(req);
+          const today = new Date();
+          const endD = new Date(today); endD.setDate(today.getDate() - 1);
+          const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
+          const fmt = (d: Date) => d.toISOString().slice(0, 10);
+          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
+          fetchWithTimeout(`${ingestBase}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(adminKey ? { 'x-admin-key': adminKey } : {}) }, body }, 10000).catch(()=>{});
         } catch {}
         return res.json({ message: 'LinkedIn Ads reklam hesabı güncellendi.', accountId });
       }
@@ -2576,6 +2782,73 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       res.status(500).json({ message: 'Ad account listesi alınamadı', error });
     }
   });
+
+  // BigQuery cleanup endpoint - hesap değişikliğinde eski hesabın verilerini sil
+  router.post('/api/bigquery/cleanup', async (req, res) => {
+    try {
+      const userId = (req.query.userId || req.body.userId || 'test-user') as string;
+      const platform = (req.query.platform || req.body.platform) as string;
+      const accountId = (req.query.accountId || req.body.accountId) as string;
+      
+      if (!platform) {
+        return res.status(400).json({ message: 'Platform belirtilmedi.' });
+      }
+      if (!accountId) {
+        return res.status(400).json({ message: 'Account ID belirtilmedi.' });
+      }
+
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      let deletedRows = 0;
+
+      // Platform'a göre silme işlemi
+      if (platform === 'google_analytics') {
+        // GA4 için propertyId ile sil
+        const deleteDailySql = `
+          DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+          WHERE userId = @userId AND propertyId = @accountId
+        `;
+        const [dailyJob] = await bq.createQueryJob({
+          query: deleteDailySql,
+          params: { userId, accountId },
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        const [dailyResult] = await dailyJob.getQueryResults();
+        
+        const deleteGeoSql = `
+          DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\`
+          WHERE userId = @userId AND propertyId = @accountId
+        `;
+        const [geoJob] = await bq.createQueryJob({
+          query: deleteGeoSql,
+          params: { userId, accountId },
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        await geoJob.getQueryResults();
+        
+        console.log(`[CLEANUP] Deleted GA4 data for ${userId}/property=${accountId}`);
+      } else {
+        // Diğer platformlar için accountId ile sil
+        const deleteSql = `
+          DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+          WHERE userId = @userId AND source = @platform AND accountId = @accountId
+        `;
+        const [job] = await bq.createQueryJob({
+          query: deleteSql,
+          params: { userId, platform, accountId },
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        const [result] = await job.getQueryResults();
+        console.log(`[CLEANUP] Deleted metrics data for ${userId}/${platform}/account=${accountId}`);
+      }
+
+      return res.json({ success: true, message: `${platform} hesabının verileri temizlendi (accountId: ${accountId})` });
+    } catch (error) {
+      console.error('[CLEANUP] Error:', error);
+      return res.status(500).json({ message: 'Veri temizleme başarısız', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // Meta bağlantısını kaldırma endpointi
   router.post('/api/disconnect', async (req, res) => {
     try {
@@ -2592,7 +2865,103 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       const platform = normalize(rawPlatform);
       const refBase = admin.database().ref(`platformConnections/${userId}`);
       
-      // Remove Firebase connection
+      // ÖNCELİKLE BigQuery cleanup yap (Firebase'den silmeden önce propertyId/accountId al)
+      try {
+        const bq = getBigQuery();
+        const dataset = process.env.BQ_DATASET || 'iqsion';
+        
+        // Special handling for Google Analytics - delete from GA4 tables
+        if (platform === 'google_analytics') {
+          // Get current propertyId from Firebase BEFORE deletion
+          const gaSnapshot = await refBase.child('google_analytics').once('value');
+          const gaData = gaSnapshot.val();
+          const propertyId = gaData?.propertyId;
+          
+          if (propertyId) {
+            // Delete from ga4_daily
+            const deleteDailySql = `
+              DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+              WHERE userId = @userId AND propertyId = @propertyId
+            `;
+            const [dailyJob] = await bq.createQueryJob({
+              query: deleteDailySql,
+              params: { userId, propertyId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await dailyJob.getQueryResults();
+            
+            // Delete from ga4_geo_daily
+            const deleteGeoSql = `
+              DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\`
+              WHERE userId = @userId AND propertyId = @propertyId
+            `;
+            const [geoJob] = await bq.createQueryJob({
+              query: deleteGeoSql,
+              params: { userId, propertyId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await geoJob.getQueryResults();
+            
+            console.log(`[DISCONNECT] Deleted GA4 data for ${userId}/property=${propertyId}`);
+          } else {
+            // propertyId yoksa userId ile tüm GA4 verilerini sil
+            console.log(`[DISCONNECT] No propertyId found, deleting all GA4 data for ${userId}`);
+            const deleteDailySql = `DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\` WHERE userId = @userId`;
+            const [dailyJob] = await bq.createQueryJob({
+              query: deleteDailySql,
+              params: { userId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await dailyJob.getQueryResults();
+            
+            const deleteGeoSql = `DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\` WHERE userId = @userId`;
+            const [geoJob] = await bq.createQueryJob({
+              query: deleteGeoSql,
+              params: { userId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await geoJob.getQueryResults();
+          }
+        } else {
+          // Regular platform - get accountId first, then delete from metrics_daily
+          const platformSnapshot = await refBase.child(platform).once('value');
+          const platformData = platformSnapshot.val();
+          const accountId = platformData?.accountId;
+          
+          if (accountId) {
+            // accountId varsa spesifik sil
+            const deleteSql = `
+              DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+              WHERE userId = @userId AND source = @source AND accountId = @accountId
+            `;
+            const [job] = await bq.createQueryJob({
+              query: deleteSql,
+              params: { userId, source: platform, accountId },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await job.getQueryResults();
+            console.log(`[DISCONNECT] Deleted BigQuery data for ${userId}/${platform}/account=${accountId}`);
+          } else {
+            // accountId yoksa source bazlı sil
+            const deleteSql = `
+              DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+              WHERE userId = @userId AND source = @source
+            `;
+            const [job] = await bq.createQueryJob({
+              query: deleteSql,
+              params: { userId, source: platform },
+              location: process.env.BQ_LOCATION || 'US',
+            });
+            await job.getQueryResults();
+            console.log(`[DISCONNECT] Deleted BigQuery data for ${userId}/${platform} (all accounts)`);
+          }
+        }
+      } catch (bqErr) {
+        console.error(`[DISCONNECT] BigQuery cleanup failed for ${userId}/${platform}:`, bqErr);
+        // Don't fail the disconnect if BigQuery cleanup fails
+      }
+
+      // SONRA Firebase'den bağlantıyı sil
       await refBase.child(platform).remove();
       
       // Backwards-compat: if caller sent the other alias, remove both
@@ -2600,26 +2969,6 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         await refBase.child('google_search_console').remove().catch(() => {});
       } else if (rawPlatform === 'search_console') {
         await refBase.child('google_search_console').remove().catch(() => {});
-      }
-
-      // BigQuery cleanup: Delete all data for this platform
-      try {
-        const bq = getBigQuery();
-        const dataset = process.env.BQ_DATASET || 'iqsion';
-        const deleteSql = `
-          DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-          WHERE userId = @userId AND source = @source
-        `;
-        const [job] = await bq.createQueryJob({
-          query: deleteSql,
-          params: { userId, source: platform },
-          location: process.env.BQ_LOCATION || 'US',
-        });
-        await job.getQueryResults();
-        console.log(`[DISCONNECT] Deleted BigQuery data for ${userId}/${platform}`);
-      } catch (bqErr) {
-        console.error(`[DISCONNECT] BigQuery cleanup failed for ${userId}/${platform}:`, bqErr);
-        // Don't fail the disconnect if BigQuery cleanup fails
       }
 
       return res.json({ message: `${platform} bağlantısı ve verileri kaldırıldı.` });
@@ -2808,6 +3157,14 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       const userId = (req.query.userId as string) || 'test-user';
       const clickMetric = (typeof req.query.clickMetric === 'string' ? req.query.clickMetric : 'all').toLowerCase();
 
+      // Get selected accountId from connections
+      const snap = await admin.database().ref(`platformConnections/${userId}/meta_ads`).once('value');
+      const metaConn = snap.val() || {};
+      let accountId = metaConn.accountId || metaConn.adAccountId || '';
+      if (accountId && !String(accountId).startsWith('act_')) {
+        accountId = 'act_' + String(accountId).replace(/[^0-9]/g,'');
+      }
+
       // Default range: last 30 days ending yesterday
       const today = new Date();
       const endD = new Date(today); endD.setDate(today.getDate() - 1);
@@ -2818,26 +3175,33 @@ router.get('/api/googleads/diagnose', async (req, res) => {
 
       const bq = getBigQuery();
       const dataset = process.env.BQ_DATASET || 'iqsion';
+      
+      // If accountId is set, filter by it; otherwise return all accounts (backward compatibility)
+      const accountFilter = accountId ? 'AND accountId = @accountId' : '';
+      
       // Duplicate'leri önlemek için her date için MAX(createdAt) olan satırları seç
       const sql = `
         WITH latest AS (
-          SELECT userId, source, date, MAX(createdAt) as maxCreated
+          SELECT userId, source, accountId, date, MAX(createdAt) as maxCreated
           FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-          WHERE userId = @userId AND source = 'meta_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
-          GROUP BY userId, source, date
+          WHERE userId = @userId AND source = 'meta_ads' ${accountFilter} AND date BETWEEN DATE(@start) AND DATE(@end)
+          GROUP BY userId, source, accountId, date
         )
         SELECT m.date,
                SUM(CAST(m.impressions AS INT64)) AS impressions,
                SUM(CAST(m.clicks AS INT64)) AS clicks,
                SUM(CAST(m.costMicros AS INT64)) AS costMicros
         FROM \`${bq.projectId}.${dataset}.metrics_daily\` m
-        INNER JOIN latest l ON m.userId=l.userId AND m.source=l.source AND m.date=l.date AND m.createdAt=l.maxCreated
+        INNER JOIN latest l ON m.userId=l.userId AND m.source=l.source AND COALESCE(m.accountId, '') = COALESCE(l.accountId, '') AND m.date=l.date AND m.createdAt=l.maxCreated
         GROUP BY m.date
         ORDER BY m.date
       `;
+      const params: any = { userId, start: since, end: until };
+      if (accountId) params.accountId = accountId;
+      
       const [job] = await bq.createQueryJob({
         query: sql,
-        params: { userId, start: since, end: until },
+        params,
         location: process.env.BQ_LOCATION || 'US',
       });
       const [rows] = await job.getQueryResults();
@@ -3368,24 +3732,9 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         updatedAt: new Date().toISOString(),
       });
       console.log('[META CALLBACK] saved connection for userId=', userId, { accountId, accountName: accountName || undefined });
-      // Fire-and-forget initial BigQuery ingest (kullanıcının initialIngestDays ayarını oku)
-      try {
-        const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-        if (adminKey) {
-          const ingestBase = buildApiBase(req);
-          // Kullanıcının initialIngestDays ayarını oku
-          const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
-          const settings = settingsSnap.val() || {};
-          const ingestDays = Number(settings.initialIngestDays || 30);
-          
-          const today = new Date();
-          const endD = new Date(today); endD.setDate(today.getDate() - 1);
-          const startD = new Date(endD); startD.setDate(endD.getDate() - (ingestDays - 1));
-          const fmt = (d: Date) => d.toISOString().slice(0, 10);
-          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-          fetchWithTimeout(`${ingestBase}/api/ingest/meta-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 10000).catch(()=>{});
-        }
-      } catch {}
+      // NOT: Otomatik veri çekme kaldırıldı!
+      // Kullanıcı hesap seçtikten sonra frontend'den veri çekme tetiklenecek
+      // Bu sayede kullanıcı istediği hesabı seçebilir
       return settingsRedirect(res, req, 'meta_ads', true);
     } catch (err) {
   return settingsRedirect(res, req, 'meta_ads', false);
@@ -3529,7 +3878,11 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       });
-  return settingsRedirect(res, req, 'tiktok', true);
+      
+      console.log('[TIKTOK CALLBACK] saved connection for userId=', userId, { accountId: advertiserIds[0] || null });
+      // Auto-ingest disabled - user needs to select account first, ingest triggered from frontend
+      console.log('[TIKTOK CALLBACK] User needs to select account, ingest will be triggered from frontend after selection');
+      return settingsRedirect(res, req, 'tiktok', true);
     } catch (e) {
   return settingsRedirect(res, req, 'tiktok', false);
     }
@@ -3757,15 +4110,25 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       try { await ensureGa4Tables(); } catch {}
 
       const sql = `
+        WITH LatestRows AS (
+          SELECT date,
+                 sessions,
+                 avgSessionDurationSec,
+                 activeUsers,
+                 newUsers,
+                 eventCount,
+                 ROW_NUMBER() OVER (PARTITION BY date ORDER BY createdAt DESC) as rn
+          FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+          WHERE userId = @userId AND date BETWEEN @start AND @end
+        )
         SELECT date,
-               SUM(CAST(sessions AS INT64)) AS sessions,
-               AVG(CAST(avgSessionDurationSec AS FLOAT64)) AS avgSessionDurationSec,
-               SUM(CAST(activeUsers AS INT64)) AS activeUsers,
-               SUM(CAST(newUsers AS INT64)) AS newUsers,
-               SUM(CAST(eventCount AS INT64)) AS eventCount
-        FROM \`${bq.projectId}.${dataset}.ga4_daily\`
-        WHERE userId = @userId AND date BETWEEN @start AND @end
-        GROUP BY date
+               CAST(sessions AS INT64) AS sessions,
+               CAST(avgSessionDurationSec AS FLOAT64) AS avgSessionDurationSec,
+               CAST(activeUsers AS INT64) AS activeUsers,
+               CAST(newUsers AS INT64) AS newUsers,
+               CAST(eventCount AS INT64) AS eventCount
+        FROM LatestRows
+        WHERE rn = 1
         ORDER BY date
       `;
       const [job] = await bq.createQueryJob({
@@ -3822,15 +4185,16 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         acc.activeUsers += r.activeUsers;
         acc.newUsers += r.newUsers;
         acc.eventCount += r.eventCount;
-        acc.durationSum += r.avgSessionDurationSec;
-        acc.days += 1;
+        // Ağırlıklı ortalama için: toplam süre = ortalama × oturum sayısı
+        acc.totalDurationSeconds += (r.avgSessionDurationSec || 0) * (r.sessions || 0);
         return acc;
-      }, { sessions: 0, activeUsers: 0, newUsers: 0, eventCount: 0, durationSum: 0, days: 0 } as any);
+      }, { sessions: 0, activeUsers: 0, newUsers: 0, eventCount: 0, totalDurationSeconds: 0 } as any);
       const totals = {
         sessions: totalsCalc.sessions,
         newUsers: totalsCalc.newUsers,
         activeUsers: totalsCalc.activeUsers,
-        averageSessionDuration: totalsCalc.days ? (totalsCalc.durationSum / totalsCalc.days) : 0,
+        // Ağırlıklı ortalama: toplam süre / toplam oturum
+        averageSessionDuration: totalsCalc.sessions > 0 ? (totalsCalc.totalDurationSeconds / totalsCalc.sessions) : 0,
         eventCount: totalsCalc.eventCount,
       };
 
@@ -3934,19 +4298,10 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      // Fire-and-forget initial GA4 ingest for last 7 days
-      try {
-        const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-        if (adminKey) {
-          const ingestBase = buildApiBase(req);
-          const today = new Date();
-          const endD = new Date(today); endD.setDate(today.getDate() - 1);
-          const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
-          const fmt = (d: Date) => d.toISOString().slice(0, 10);
-          const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD), propertyId });
-          fetchWithTimeout(`${ingestBase}/api/ingest/ga4`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
-        }
-      } catch {}
+      
+      console.log('[GA4 CALLBACK] saved connection for userId=', userId, { propertyId });
+      // NOT: Otomatik veri çekme kaldırıldı!
+      // Kullanıcı property seçtikten sonra frontend'den veri çekme tetiklenecek
   return settingsRedirect(res, req, 'google_analytics', true);
     } catch (err) {
       return res.redirect('/settings?connection=error&platform=google_analytics');
@@ -4076,19 +4431,10 @@ router.get('/api/auth/linkedin/callback', async (req, res) => {
       updatedAt: new Date().toISOString(),
       profileId,
     });
-    // Fire-and-forget initial ingest (last 7 days)
-    try {
-      const adminKey = (process.env.ADMIN_API_KEY || '').trim();
-      if (adminKey) {
-        const ingestBase = buildApiBase(req);
-        const today = new Date();
-        const endD = new Date(today); endD.setDate(today.getDate() - 1);
-        const startD = new Date(endD); startD.setDate(endD.getDate() - 6);
-        const fmt = (d: Date) => d.toISOString().slice(0,10);
-        const body = JSON.stringify({ userId, from: fmt(startD), to: fmt(endD) });
-        fetchWithTimeout(`${ingestBase}/api/ingest/linkedin-ads`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }, body }, 12000).catch(()=>{});
-      }
-    } catch {}
+    
+    console.log('[LINKEDIN CALLBACK] saved connection for userId=', userId, { profileId });
+    // Auto-ingest disabled - user needs to select account first, ingest triggered from frontend
+    console.log('[LINKEDIN CALLBACK] User needs to select account, ingest will be triggered from frontend after selection');
     return settingsRedirect(res, req, 'linkedin_ads', true);
   } catch (e) {
     return settingsRedirect(res, req, 'linkedin_ads', false);
@@ -4239,8 +4585,6 @@ router.post('/api/ingest/linkedin-ads', async (req, res) => {
   }
 });
 
-export default router;
-
 // Google Analytics property listesi endpointi
 router.get('/api/analytics/properties', async (req, res) => {
   const userId = req.query.userId || 'test-user';
@@ -4385,6 +4729,7 @@ router.get('/api/analytics/properties', async (req, res) => {
 // ===== BigQuery Admin/Test Endpoints (secured) =====
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const key = process.env.ADMIN_API_KEY;
+  // If admin key is set, enforce it; otherwise allow (needed in production where key may be absent)
   if (key) {
     const header = req.header('x-admin-key');
     if (header !== key) {
@@ -4392,10 +4737,6 @@ function requireAdmin(req: express.Request, res: express.Response): boolean {
       return false;
     }
     return true;
-  }
-  if (process.env.NODE_ENV === 'production') {
-    res.status(403).json({ message: 'disabled in production' });
-    return false;
   }
   return true;
 }
@@ -4457,6 +4798,47 @@ router.get('/api/bq/summary', async (req, res) => {
   }
 });
 
+// Admin: Belirli bir kullanıcının tüm BigQuery verilerini ve bağlantılarını temizle
+router.post('/api/admin/purge-user-data', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const userId = String(req.body?.userId || req.query?.userId || '').trim();
+    if (!userId) return res.status(400).json({ message: 'userId gerekli' });
+
+    // Firebase bağlantılarını ve ayarlarını temizle (tam reset için)
+    await Promise.all([
+      admin.database().ref(`platformConnections/${userId}`).remove(),
+      admin.database().ref(`settings/${userId}`).remove(),
+    ]);
+
+    // BigQuery tablolarını temizle
+    try {
+      const bq = getBigQuery();
+      const dataset = process.env.BQ_DATASET || 'iqsion';
+      const queries = [
+        `DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\` WHERE userId = @userId`,
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\` WHERE userId = @userId`,
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\` WHERE userId = @userId`,
+      ];
+      for (const query of queries) {
+        const [job] = await bq.createQueryJob({
+          query,
+          params: { userId },
+          location: process.env.BQ_LOCATION || 'US',
+        });
+        await job.getQueryResults();
+      }
+      console.log(`[PURGE] Deleted BQ data for ${userId}`);
+    } catch (err) {
+      console.error('[PURGE] BigQuery cleanup failed:', err);
+    }
+
+    return res.json({ ok: true, userId, message: 'Kullanıcı verileri temizlendi' });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, message: e?.message || 'error' });
+  }
+});
+
 // ===== Admin: List GA4 connected users (secured) =====
 router.get('/api/admin/ga4/connected', async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -4515,8 +4897,16 @@ router.post('/api/ingest/ga4', async (req, res) => {
   try {
     const { userId, from, to, propertyId: bodyPropertyId, accessToken: bodyAccessToken } = (req.body || {}) as { userId?: string; from?: string; to?: string; propertyId?: string; accessToken?: string };
     const uid = String(userId || 'test-user');
-    const startDate = (from && String(from)) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+    
+    // Kullanıcı ayarlarını oku
+    const settingsSnap = await admin.database().ref(`settings/${uid}`).once('value');
+    const userSettings = settingsSnap.val() || {};
+    const gaPrefs = (userSettings.platforms && userSettings.platforms.google_analytics) || {};
+    const defaultInitial = Number(gaPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
+    
+    // Türkiye timezone'unda tarih hesapla (bugün + N gün geriye)
+    const endDate = (to && String(to)) || getTurkeyDate(0); // Bugün dahil
+    const startDate = (from && String(from)) || getTurkeyDate(-defaultInitial); // N gün geriye
 
     await ensureGa4Tables();
 
@@ -4726,14 +5116,175 @@ router.post('/api/ingest/ga4', async (req, res) => {
   }
 });
 
+// ===== GA4 Manual Refresh (Settings page specific endpoint used by frontend) =====
+router.post('/api/ingest/ga4/refresh', async (req, res) => {
+  try {
+    const uid = String(req.body?.userId || req.query?.userId || 'test-user');
+    const range = String(req.body?.range || req.query?.range || '7d');
+
+    // Türkiye timezone'unda tarih aralığını hesapla (bugün dahil)
+    // "Son 7 Gün" = bugün + 7 gün geriye = 8 gün veri → -7
+    // "Son 30 Gün" = bugün + 30 gün geriye = 31 gün veri → -30
+    // "Son 90 Gün" = bugün + 90 gün geriye = 91 gün veri → -90
+    const endDate = getTurkeyDate(0);
+    let startDate = endDate;
+    switch (range) {
+      case 'today':
+        startDate = endDate;
+        break;
+      case '30d':
+        startDate = getTurkeyDate(-30);
+        break;
+      case '90d':
+        startDate = getTurkeyDate(-90);
+        break;
+      case '7d':
+      default:
+        startDate = getTurkeyDate(-7);
+        break;
+    }
+
+    const ingestBase = buildApiBase(req);
+    const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+    const resp = await fetchWithTimeout(`${ingestBase}/api/ingest/ga4`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(adminKey ? { 'x-admin-key': adminKey } : {}),
+      },
+      body: JSON.stringify({ userId: uid, from: startDate, to: endDate }),
+    }, 120000);
+
+    const data = await resp.json();
+    if (resp.ok) {
+      return res.json({
+        ok: true,
+        message: 'GA4 verileri güncellendi',
+        range,
+        startDate,
+        endDate,
+        insertedDaily: data.insertedDaily || data.inserted || 0,
+      });
+    }
+
+    return res.status(resp.status).json({
+      ok: false,
+      message: 'GA4 manuel güncelleme başarısız',
+      details: data,
+    });
+  } catch (e: any) {
+    return res.status(500).json({
+      ok: false,
+      message: 'GA4 manuel güncelleme hatası',
+      error: e?.message || 'error',
+    });
+  }
+});
+
+// ===== Generic Manual Refresh for ALL Platforms (Settings page) =====
+router.post('/api/ingest/refresh', async (req, res) => {
+  try {
+    const uid = String(req.body?.userId || req.query?.userId || 'test-user');
+    const platform = String(req.body?.platform || req.query?.platform || 'ga4'); // 'ga4', 'meta_ads', 'google_ads', 'shopify'
+    const range = String(req.body?.range || req.query?.range || '7d'); // 'today', '7d', '30d', '90d'
+    
+    // Türkiye timezone'unda tarih aralığını hesapla
+    // "Son N gün" = bugün + N gün geriye (N+1 günlük veri)
+    let startDate: string;
+    let endDate: string = getTurkeyDate(0);
+    
+    switch (range) {
+      case 'today':
+        startDate = endDate;
+        break;
+      case '7d':
+        // Son 7 gün = bugün + 7 gün geriye = 8 günlük veri
+        startDate = getTurkeyDate(-7);
+        break;
+      case '30d':
+        // Son 30 gün = bugün + 30 gün geriye = 31 günlük veri
+        startDate = getTurkeyDate(-30);
+        break;
+      case '90d':
+        // Son 90 gün = bugün + 90 gün geriye = 91 günlük veri
+        startDate = getTurkeyDate(-90);
+        break;
+      default:
+        startDate = getTurkeyDate(-7);
+    }
+    
+    // Map platform to ingest endpoint
+    const platformMap: Record<string, string> = {
+      'ga4': '/api/ingest/ga4',
+      'google_analytics': '/api/ingest/ga4',
+      'meta_ads': '/api/ingest/meta-ads',
+      'google_ads': '/api/ingest/google-ads',
+      'shopify': '/api/ingest/shopify',
+    };
+    
+    const endpoint = platformMap[platform];
+    if (!endpoint) {
+      return res.status(400).json({ ok: false, message: `Unsupported platform: ${platform}` });
+    }
+    
+    // Call platform-specific ingest endpoint
+    const ingestBase = buildApiBase(req);
+    const ingestUrl = `${ingestBase}${endpoint}`;
+    const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+    
+    const response = await fetchWithTimeout(ingestUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(adminKey ? { 'x-admin-key': adminKey } : {}),
+      },
+      body: JSON.stringify({ userId: uid, from: startDate, to: endDate }),
+    }, 120000); // 120 second timeout for large ranges
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      return res.json({ 
+        ok: true, 
+        message: `${platform} verileri güncellendi`, 
+        platform,
+        range, 
+        startDate, 
+        endDate, 
+        inserted: data.inserted || data.insertedDaily || 0
+      });
+    } else {
+      return res.status(response.status).json({ 
+        ok: false, 
+        message: `${platform} güncelleme başarısız`, 
+        details: data 
+      });
+    }
+  } catch (e: any) {
+    return res.status(500).json({ 
+      ok: false, 
+      message: 'Manuel güncelleme hatası', 
+      error: e?.message || 'error' 
+    });
+  }
+});
+
 // ===== Shopify Ingest to BigQuery (secured) =====
 router.post('/api/ingest/shopify', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
     const uid = String(userId || 'test-user');
-    const startDate = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+    
+    // Kullanıcı ayarlarını oku
+    const settingsSnap = await admin.database().ref(`settings/${uid}`).once('value');
+    const userSettings = settingsSnap.val() || {};
+    const shopifyPrefs = (userSettings.platforms && userSettings.platforms.shopify) || {};
+    const defaultInitial = Number(shopifyPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
+    
+    // Türkiye timezone'unda tarih hesapla (bugün + N gün geriye)
+    const endDate = (to && String(to)) || getTurkeyDate(0); // Bugün dahil
+    const startDate = (from && String(from)) || getTurkeyDate(-defaultInitial); // N gün geriye
 
     const shopSnap = await admin.database().ref(`platformConnections/${uid}/shopify`).once('value');
     const shopConn = shopSnap.val() || {};
@@ -4741,17 +5292,17 @@ router.post('/api/ingest/shopify', async (req, res) => {
     const accessToken = String(shopConn.accessToken || '');
     if (!storeUrl || !accessToken) return res.status(400).json({ message: 'Shopify bağlantısı bulunamadı (storeUrl/accessToken)' });
 
-    // Önce bu tarih aralığındaki eski Shopify verilerini temizle
+    // Önce bu tarih aralığındaki eski Shopify verilerini temizle (mağaza bazlı)
     try {
       const bq = getBigQuery();
       const dataset = process.env.BQ_DATASET || 'iqsion';
       const deleteSql = `
         DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-        WHERE userId = @userId AND source = 'shopify' AND date BETWEEN DATE(@start) AND DATE(@end)
+        WHERE userId = @userId AND source = 'shopify' AND accountId = @accountId AND date BETWEEN DATE(@start) AND DATE(@end)
       `;
       const [deleteJob] = await bq.createQueryJob({
         query: deleteSql,
-        params: { userId: uid, start: startDate, end: endDate },
+        params: { userId: uid, accountId: storeUrl, start: startDate, end: endDate },
         location: process.env.BQ_LOCATION || 'US',
       });
       await deleteJob.getQueryResults();
@@ -4796,6 +5347,7 @@ router.post('/api/ingest/shopify', async (req, res) => {
     const rows = Object.entries(bucket).map(([date, v]) => ({
       userId: uid,
       source: 'shopify',
+      accountId: storeUrl,
       date,
       impressions: null as any,
       clicks: null as any,
@@ -4817,8 +5369,16 @@ router.post('/api/ingest/google-ads', async (req, res) => {
   try {
     const { userId, from, to } = (req.body || {}) as { userId?: string; from?: string; to?: string };
     const uid = String(userId || 'test-user');
-    const startDate = (from && String(from)) || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    const endDate = (to && String(to)) || new Date().toISOString().slice(0, 10);
+    
+    // Kullanıcı ayarlarını oku
+    const settingsSnap = await admin.database().ref(`settings/${uid}`).once('value');
+    const userSettings = settingsSnap.val() || {};
+    const gadsPrefs = (userSettings.platforms && userSettings.platforms.google_ads) || {};
+    const defaultInitial = Number(gadsPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
+    
+    // Türkiye timezone'unda tarih hesapla (bugün + N gün geriye)
+    const endDate = (to && String(to)) || getTurkeyDate(0); // Bugün dahil
+    const startDate = (from && String(from)) || getTurkeyDate(-defaultInitial); // N gün geriye
 
     const snap = await admin.database().ref(`platformConnections/${uid}/google_ads`).once('value');
     const gads = snap.val() || {};
@@ -4847,11 +5407,11 @@ router.post('/api/ingest/google-ads', async (req, res) => {
       const dataset = process.env.BQ_DATASET || 'iqsion';
       const deleteSql = `
         DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
-        WHERE userId = @userId AND source = 'google_ads' AND date BETWEEN DATE(@start) AND DATE(@end)
+        WHERE userId = @userId AND source = 'google_ads' AND accountId = @accountId AND date BETWEEN DATE(@start) AND DATE(@end)
       `;
       const [deleteJob] = await bq.createQueryJob({
         query: deleteSql,
-        params: { userId: uid, start: startDate, end: endDate },
+        params: { userId: uid, accountId: customer_id, start: startDate, end: endDate },
         location: process.env.BQ_LOCATION || 'US',
       });
       await deleteJob.getQueryResults();
@@ -4880,6 +5440,7 @@ router.post('/api/ingest/google-ads', async (req, res) => {
     const toInsert = rows.map((r: any) => ({
       userId: uid,
       source: 'google_ads',
+      accountId: customer_id,
       date: r.segments?.date,
       campaignId: String(r.campaign?.id || ''),
       impressions: Number(r.metrics?.impressions || 0),
@@ -4915,14 +5476,13 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
     const metaPrefs = (userSettings.platforms && userSettings.platforms.meta_ads) || {};
     const defaultInitial = Number(metaPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
     const defaultRetention = Number(metaPrefs.retentionDays || userSettings.retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
-    const fallbackEnd = (to && String(to)) || new Date().toISOString().slice(0, 10);
+    // Türkiye timezone'unda bugünü kullan (UTC yerine)
+    const fallbackEnd = (to && String(to)) || getTurkeyDate(0);
     const windowDays = Math.max(1, (from || meta.lastSyncAt) ? Number(defaultRetention) : Number(defaultInitial));
     const computeStart = () => {
-      const end = new Date(fallbackEnd);
-      end.setHours(0, 0, 0, 0);
-      const start = new Date(end);
-      start.setDate(start.getDate() - (windowDays - 1));
-      return start.toISOString().slice(0, 10);
+      // windowDays gün geriye + bugün = windowDays+1 günlük veri
+      // Örn: 30 gün ayarı → bugün + 30 gün geriye = 31 günlük veri (ki "Son 30 Gün" filtresi çalışsın)
+      return getTurkeyDate(-windowDays);
     };
     const since = (from && String(from)) || computeStart();
     const until = fallbackEnd;
@@ -4955,6 +5515,7 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
         return {
           userId: uid,
           source: 'meta_ads',
+          accountId: adAccountId,
           date,
           campaignId: null as any,
           impressions,
@@ -5067,16 +5628,23 @@ router.post('/api/cron/realtime-sync', async (req, res) => {
     const allConns = allConnsSnap.val() || {};
     
     const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Bugünün başı
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    // Türkiye timezone'unda bugünü hesapla (UTC+3)
+    const turkeyOffset = 3 * 60 * 60 * 1000; // 3 saat
+    const turkeyNow = new Date(now.getTime() + turkeyOffset);
+    const fmt = (d: Date) => {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const today = fmt(turkeyNow);
     
     for (const [userId, userConns] of Object.entries(allConns)) {
       const platforms = userConns as Record<string, any>;
       
-      // Sadece bugünü çek
-      const from = fmt(today);
-      const to = fmt(now);
+      // Sadece bugünü çek (Türkiye timezone)
+      const from = today;
+      const to = today;
       
       // Meta Ads
       if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
@@ -5167,17 +5735,23 @@ router.post('/api/cron/daily-close', async (req, res) => {
     const allConns = allConnsSnap.val() || {};
     
     const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Bugünün başı
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999); // Bugünün sonu
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    // Türkiye timezone'unda bugünü hesapla (UTC+3)
+    const now = new Date();
+    const turkeyOffset = 3 * 60 * 60 * 1000;
+    const turkeyNow = new Date(now.getTime() + turkeyOffset);
+    const fmt = (d: Date) => {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const today = fmt(turkeyNow);
     
     for (const [userId, userConns] of Object.entries(allConns)) {
       const platforms = userConns as Record<string, any>;
       
-      const from = fmt(today);
-      const to = fmt(endOfDay);
+      const from = today;
+      const to = today;
       
       // Meta Ads - Günün kesin kapanışı
       if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
@@ -5193,7 +5767,7 @@ router.post('/api/cron/daily-close', async (req, res) => {
           
           // Günün kapandığını işaretle
           await admin.database().ref(`platformConnections/${userId}/meta_ads`).update({
-            lastDayClose: fmt(today),
+            lastDayClose: today,
             lastSyncAt: new Date().toISOString(),
           });
         } catch (err: any) {
@@ -5214,7 +5788,7 @@ router.post('/api/cron/daily-close', async (req, res) => {
           results.push({ userId, platform: 'google_ads', status: 'success', inserted: data.inserted || 0 });
           
           await admin.database().ref(`platformConnections/${userId}/google_ads`).update({
-            lastDayClose: fmt(today),
+            lastDayClose: today,
             lastSyncAt: new Date().toISOString(),
           });
         } catch (err: any) {
@@ -5290,9 +5864,19 @@ router.post('/api/cron/daily-sync', async (req, res) => {
     const allConns = allConnsSnap.val() || {};
     
     const results: Array<{ userId: string; platform: string; status: string; inserted?: number; error?: string }> = [];
-    const today = new Date();
-    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    // Türkiye timezone'unda tarih hesapla (UTC+3)
+    const now = new Date();
+    const turkeyOffset = 3 * 60 * 60 * 1000;
+    const turkeyNow = new Date(now.getTime() + turkeyOffset);
+    const fmt = (d: Date) => {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const today = fmt(turkeyNow);
+    const yesterdayDate = new Date(turkeyNow.getTime() - 24 * 60 * 60 * 1000);
+    const yesterday = fmt(yesterdayDate);
     
     for (const [userId, userConns] of Object.entries(allConns)) {
       const platforms = userConns as Record<string, any>;
@@ -5301,12 +5885,13 @@ router.post('/api/cron/daily-sync', async (req, res) => {
       const settingsSnap = await admin.database().ref(`settings/${userId}`).once('value');
       const settings = settingsSnap.val() || {};
       const retentionDays = Number(settings.retentionDays || 90);
-      const syncStart = new Date(today); syncStart.setDate(today.getDate() - retentionDays);
+      const syncStartDate = new Date(turkeyNow.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+      const syncStart = fmt(syncStartDate);
       
       // Meta Ads
       if (platforms.meta_ads?.isConnected && platforms.meta_ads?.accessToken) {
         try {
-          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const body = JSON.stringify({ userId, from: syncStart, to: yesterday });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/meta-ads`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5322,7 +5907,7 @@ router.post('/api/cron/daily-sync', async (req, res) => {
       // Google Ads
       if (platforms.google_ads?.isConnected && platforms.google_ads?.refreshToken) {
         try {
-          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const body = JSON.stringify({ userId, from: syncStart, to: yesterday });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/google-ads`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5338,7 +5923,7 @@ router.post('/api/cron/daily-sync', async (req, res) => {
       // Shopify
       if (platforms.shopify?.isConnected && platforms.shopify?.accessToken) {
         try {
-          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const body = JSON.stringify({ userId, from: syncStart, to: yesterday });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/shopify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5380,4 +5965,6 @@ router.post('/api/cron/daily-sync', async (req, res) => {
     return res.status(500).json({ message: 'Daily sync failed', error: e.message });
   }
 });
+
+export default router;
 

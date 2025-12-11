@@ -6,6 +6,18 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+import { DataSettingsDialog } from "../components/DataSettingsDialog";
+import { AccountSelectionDialog } from "../components/AccountSelectionDialog";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
 import { isUnauthorizedError } from "../lib/authUtils";
@@ -54,6 +66,26 @@ export default function Settings() {
   const [selectedGaPropertyId, setSelectedGaPropertyId] = useState<string>('');
   const [isEditingShopifyStore, setIsEditingShopifyStore] = useState<boolean>(false);
   const [shopifyStoreDraft, setShopifyStoreDraft] = useState<string>('');
+  const [disconnectPlatformId, setDisconnectPlatformId] = useState<string | null>(null);
+
+  // DataSettingsDialog için state'ler
+  const [dataSettingsDialogOpen, setDataSettingsDialogOpen] = useState<boolean>(false);
+  const [dataSettingsDialogMode, setDataSettingsDialogMode] = useState<'connect' | 'change'>('connect');
+  const [dataSettingsDialogPlatform, setDataSettingsDialogPlatform] = useState<string>('');
+  const [dataSettingsDialogPlatformName, setDataSettingsDialogPlatformName] = useState<string>('');
+  const [dataSettingsDialogCurrentAccount, setDataSettingsDialogCurrentAccount] = useState<string | undefined>(undefined);
+  const [dataSettingsDialogNewAccount, setDataSettingsDialogNewAccount] = useState<string | undefined>(undefined);
+  const [pendingAccountChange, setPendingAccountChange] = useState<{ platform: string; newAccountId: string; newAccountName?: string } | null>(null);
+  
+  // Loading state'leri
+  const [isAccountChanging, setIsAccountChanging] = useState<boolean>(false);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [loadingPlatform, setLoadingPlatform] = useState<string | null>(null);
+
+  // AccountSelectionDialog için state'ler (OAuth dönüşünde hesap seçimi)
+  const [accountSelectionDialogOpen, setAccountSelectionDialogOpen] = useState<boolean>(false);
+  const [accountSelectionPlatform, setAccountSelectionPlatform] = useState<string>('');
+  const [accountSelectionPlatformName, setAccountSelectionPlatformName] = useState<string>('');
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -72,7 +104,8 @@ export default function Settings() {
     }
   }, [user, authLoading, toast]);
 
-  // OAuth dönüşünde bağlantı durumunu hemen yansıt (UX)
+  // OAuth dönüşünde bağlantı durumunu hemen yansıt
+  // Hesap seçimi için popup açılacak, veri çekme hesap seçildikten sonra yapılacak
   useEffect(() => {
     if (!user) return;
     const uid = (user as any)?.uid || (user as any)?.id;
@@ -94,8 +127,70 @@ export default function Settings() {
       url.searchParams.delete('connection');
       url.searchParams.delete('platform');
       window.history.replaceState({}, '', url.toString());
+
+      // Platform adını al (inline helper)
+      const platformNames: Record<string, string> = {
+        meta_ads: 'Meta Ads',
+        meta: 'Meta Ads',
+        google_ads: 'Google Ads',
+        google: 'Google Ads',
+        google_analytics: 'Google Analytics',
+        shopify: 'Shopify',
+        tiktok: 'TikTok Ads',
+        linkedin_ads: 'LinkedIn Ads',
+        google_search_console: 'Search Console',
+      };
+      const getPlatformDisplayName = (p: string) => platformNames[p] || p;
+
+      // Platform adını normalize et
+      const normalizedPlatform = platform === 'meta' ? 'meta_ads' : 
+                                 platform === 'google' ? 'google_ads' : 
+                                 platform;
+
+      // Hesap seçimi gerektiren platformlar için popup aç
+      const platformsRequiringAccountSelection = ['meta_ads', 'google_ads', 'google_analytics', 'tiktok', 'linkedin_ads'];
+      
+      if (platformsRequiringAccountSelection.includes(normalizedPlatform)) {
+        // Bağlantı başarılı toast'ı göster
+        toast({
+          title: '🎉 Bağlantı Başarılı!',
+          description: `${getPlatformDisplayName(normalizedPlatform)} bağlandı. Şimdi hesabınızı seçin.`,
+        });
+        
+        // AccountSelectionDialog'u aç
+        setAccountSelectionPlatform(normalizedPlatform);
+        setAccountSelectionPlatformName(getPlatformDisplayName(normalizedPlatform));
+        // Dialog'u biraz gecikmeyle aç (connection data'nın yüklenmesi için)
+        setTimeout(() => {
+          setAccountSelectionDialogOpen(true);
+        }, 500);
+      } else {
+        // Shopify gibi hesap seçimi gerektirmeyen platformlar için otomatik ingest tetikle
+        let ingestDays = 30;
+        try {
+          const stored = localStorage.getItem('iqsion_pending_ingest_days');
+          if (stored) {
+            ingestDays = parseInt(stored, 10) || 30;
+            localStorage.removeItem('iqsion_pending_ingest_days');
+          }
+        } catch (_) {}
+        
+        toast({
+          title: '🎉 Bağlantı Başarılı!',
+          description: `${getPlatformDisplayName(normalizedPlatform)} başarıyla bağlandı. ${ingestDays} günlük veriler arka planda çekiliyor.`,
+        });
+        
+        // Shopify için otomatik ingest tetikle
+        if (normalizedPlatform === 'shopify') {
+          apiRequest('POST', '/api/ingest/refresh', {
+            userId: uid,
+            platform: 'shopify',
+            range: ingestDays <= 7 ? '7d' : ingestDays <= 30 ? '30d' : '90d',
+          }).catch(console.error);
+        }
+      }
     }
-  }, [user]);
+  }, [user, toast]);
 
   const { data: brandProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['brand-profile', (user as any)?.uid || (user as any)?.id],
@@ -288,33 +383,264 @@ export default function Settings() {
     setProfileData((prev: BrandProfile) => ({ ...(prev || {}), [field]: value }));
   };
 
-  const handleConnectPlatform = async (platformId: string) => {
+  // Platform adını ID'den al
+  const getPlatformName = (platformId: string) => {
+    const platform = platforms.find(p => p.id === platformId);
+    return platform?.name || platformId;
+  };
+
+  // AccountSelectionDialog için hesap listesi
+  const getAccountsForPlatform = (platformId: string): { id: string; name: string }[] => {
+    switch (platformId) {
+      case 'meta_ads':
+        return (metaAdAccounts?.data || []).map((acc: any) => ({ id: acc.id, name: acc.name || acc.id }));
+      case 'google_ads':
+        return (googleAdAccounts?.accounts || []).map((acc: any) => ({ id: acc.id || acc.customerId, name: acc.descriptiveName || acc.id || acc.customerId }));
+      case 'google_analytics':
+        // Backend zaten numeric ID döndürüyor: { id: "123456789", name: "display name" }
+        return (gaProperties?.properties || []).map((prop: any) => ({
+          id: prop.id,  // numeric ID (backend zaten "properties/" prefix'ini kaldırmış)
+          name: prop.name || prop.id  // display name
+        }));
+      case 'tiktok':
+        return ((tiktokAdAccounts?.data?.list || [])).map((acc: any) => ({ id: acc.advertiser_id, name: acc.advertiser_name || acc.advertiser_id }));
+      case 'linkedin_ads':
+        return (linkedinAccounts?.accounts || []).map((acc: any) => ({ id: acc.id, name: acc.name || acc.id }));
+      default:
+        return [];
+    }
+  };
+
+  // AccountSelectionDialog için loading durumu
+  const isLoadingAccountsForPlatform = (platformId: string): boolean => {
+    switch (platformId) {
+      case 'google_analytics':
+        return gaPropsLoading;
+      default:
+        // Diğer platformlar için basit kontrol
+        return !connections;
+    }
+  };
+
+  // AccountSelectionDialog onConfirm handler
+  const handleAccountSelectionConfirm = async (accountId: string, accountName: string, ingestDays: number, retentionDays: number) => {
+    const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+    const platformId = accountSelectionPlatform;
+    
+    setAccountSelectionDialogOpen(false);
+    setIsAccountChanging(true);
+    setLoadingPlatform(platformId);
+
+    toast({ 
+      title: 'Veriler Çekiliyor', 
+      description: `${accountSelectionPlatformName} için ${ingestDays} günlük veriler çekiliyor. Bu işlem 1-3 dakika sürebilir...`,
+    });
+
+    try {
+      // 1. Hesabı kaydet
+      if (platformId === 'google_analytics') {
+        // GA4 için propertyId olarak kaydet
+        await apiRequest('POST', '/api/connections', {
+          platform: platformId,
+          propertyId: accountId,
+          userId: uid,
+        });
+      } else {
+        // Diğer platformlar için accountId olarak kaydet
+        await apiRequest('POST', '/api/connections', {
+          platform: platformId,
+          accountId: accountId,
+          userId: uid,
+        });
+      }
+
+      // 2. Ayarları kaydet (hem ingestDays hem retentionDays)
+      await apiRequest('POST', `/api/settings?userId=${encodeURIComponent(uid)}`, {
+        initialIngestDays: ingestDays,
+        retentionDays: retentionDays,
+      });
+
+      // 3. Veri çek
+      const ingestEndpoint = platformId === 'google_analytics' 
+        ? '/api/ingest/ga4' 
+        : '/api/ingest/refresh';
+      
+      await apiRequest('POST', ingestEndpoint, {
+        userId: uid,
+        platform: platformId,
+        range: ingestDays <= 7 ? '7d' : ingestDays <= 30 ? '30d' : '90d',
+      });
+
+      toast({ 
+        title: '✅ Başarılı', 
+        description: `${accountSelectionPlatformName} hesabı seçildi ve ${ingestDays} günlük veriler çekildi. Veriler ${retentionDays} gün saklanacak.`,
+      });
+
+      // Cache'i güncelle
+      queryClient.setQueryData(['connections', uid], (prev: any) => ({
+        ...(prev || {}),
+        [platformId]: {
+          ...((prev && prev[platformId]) || {}),
+          ...(platformId === 'google_analytics' ? { propertyId: accountId } : { accountId: accountId }),
+          isConnected: true,
+        },
+      }));
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
+    } catch (e: any) {
+      toast({ 
+        title: 'Hata', 
+        description: e?.message || 'Hesap seçimi veya veri çekme başarısız', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsAccountChanging(false);
+      setLoadingPlatform(null);
+    }
+  };
+
+  // İlk bağlantı için direkt OAuth'a yönlendir (dialog açmadan)
+  const openConnectDialog = (platformId: string) => {
+    // Direkt OAuth'a yönlendir - hesap seçimi ve ayarlar OAuth dönüşünde yapılacak
+    executeConnectPlatformDirect(platformId);
+  };
+
+  // Hesap değişikliği için dialog aç
+  const openAccountChangeDialog = (platformId: string, newAccountId: string, newAccountName?: string, currentAccountName?: string) => {
+    setDataSettingsDialogPlatform(platformId);
+    setDataSettingsDialogPlatformName(getPlatformName(platformId));
+    setDataSettingsDialogMode('change');
+    setDataSettingsDialogCurrentAccount(currentAccountName);
+    setDataSettingsDialogNewAccount(newAccountName || newAccountId);
+    setPendingAccountChange({ platform: platformId, newAccountId, newAccountName });
+    setDataSettingsDialogOpen(true);
+  };
+
+  // DataSettingsDialog onConfirm handler (sadece hesap değişikliği için kullanılacak)
+  const handleDataSettingsConfirm = async (settings: { initialIngestDays: number; retentionDays: number }) => {
+    const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+    
+    // Önce ayarları kaydet
+    try {
+      await apiRequest('POST', `/api/settings?userId=${encodeURIComponent(uid)}`, {
+        initialIngestDays: settings.initialIngestDays,
+        retentionDays: settings.retentionDays,
+      });
+    } catch (e) {
+      console.error('[DataSettings] Failed to save settings:', e);
+    }
+
+    // Eğer hesap değişikliği modundaysak
+    if (dataSettingsDialogMode === 'change' && pendingAccountChange) {
+      setDataSettingsDialogOpen(false);
+      await executeAccountChange(pendingAccountChange.platform, pendingAccountChange.newAccountId, settings);
+      return;
+    }
+
+    // İlk bağlantı modundaysak, OAuth'a yönlendir (artık bu kod çağrılmayacak ama eski uyumluluk için bırakıyoruz)
+    setDataSettingsDialogOpen(false);
+    await executeConnectPlatform(dataSettingsDialogPlatform, settings);
+  };
+
+  // Hesap değişikliğini gerçekleştir
+  const executeAccountChange = async (platformId: string, newAccountId: string, settings: { initialIngestDays: number; retentionDays: number }) => {
+    const uid = (user as any)?.uid || (user as any)?.id || 'test-user';
+    
+    // Loading state'i başlat
+    setIsAccountChanging(true);
+    setLoadingPlatform(platformId);
+    
+    // Kullanıcıya bilgi ver
+    toast({ 
+      title: 'Hesap Değiştiriliyor', 
+      description: `${getPlatformName(platformId)} hesabı değiştiriliyor. Bu işlem veri miktarına göre 1-3 dakika sürebilir...`,
+    });
+    
+    try {
+      // 1. Eski hesabın verilerini BigQuery'den sil
+      const currentAccountId = (connections as any)?.[platformId]?.accountId;
+      if (currentAccountId && currentAccountId !== newAccountId) {
+        await apiRequest('POST', '/api/bigquery/cleanup', {
+          userId: uid,
+          platform: platformId,
+          accountId: currentAccountId,
+        });
+      }
+
+      // 2. Yeni hesabı kaydet
+      const resp = await apiRequest('POST', '/api/connections', {
+        platform: platformId,
+        accountId: newAccountId,
+        userId: uid,
+      });
+      await resp.json();
+
+      // 3. Yeni hesap için veri çek
+      await apiRequest('POST', '/api/ingest/refresh', {
+        userId: uid,
+        platform: platformId,
+        range: settings.initialIngestDays <= 7 ? '7d' : settings.initialIngestDays <= 30 ? '30d' : '90d',
+      });
+
+      toast({ title: 'Başarılı', description: `${getPlatformName(platformId)} hesabı değiştirildi ve ${settings.initialIngestDays} günlük veriler çekildi` });
+      
+      // Cache'i güncelle
+      queryClient.setQueryData(['connections', uid], (prev: any) => ({
+        ...(prev || {}),
+        [platformId]: {
+          ...((prev && prev[platformId]) || {}),
+          accountId: newAccountId,
+          isConnected: true,
+        },
+      }));
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'Hesap değiştirilemedi', variant: 'destructive' });
+    } finally {
+      // Loading state'i bitir
+      setIsAccountChanging(false);
+      setLoadingPlatform(null);
+    }
+  };
+
+  // OAuth bağlantısını gerçekleştir
+  const executeConnectPlatform = async (platformId: string, settings: { initialIngestDays: number; retentionDays: number }) => {
     try {
       if (!user) return;
       
       const uid = ((user as any)?.uid || (user as any)?.id) as string | undefined;
+      
+      // Loading state başlat
+      setIsConnecting(true);
+      setLoadingPlatform(platformId);
+      
+      // İlk veri çekme gün sayısını localStorage'a kaydet (callback'te kullanılacak)
+      try {
+        localStorage.setItem('iqsion_pending_ingest_days', String(settings.initialIngestDays));
+      } catch (_) {}
+      
       let authUrl = '';
-      const baseUrl = window.location.origin;
       
       switch (platformId) {
         case 'shopify': {
-          // Eğer bağlantı kayıtlarında mağaza zaten biliniyorsa direkt yönlendir (prompt yok)
           const savedStore = (connections as any)?.shopify?.storeUrl as string | undefined;
           let storeUrl = savedStore || localStorage.getItem('iqsion_shopify_store') || '';
           if (!storeUrl) {
-            // Son çare: kısa isim al (örn: mystore); kullanıcı istemiyorsa Cancel edebilir
             const name = prompt('Shopify mağaza adınızı girin (örn: mystore veya mystore.myshopify.com):') || '';
-            if (!name) return;
+            if (!name) {
+              setIsConnecting(false);
+              setLoadingPlatform(null);
+              return;
+            }
             storeUrl = name;
           }
-          // Normalizasyon: sadece isim verildiyse domain ekle; protocol varsa kırp
           storeUrl = storeUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
           if (!/\.myshopify\.com$/i.test(storeUrl)) {
             storeUrl = `${storeUrl}.myshopify.com`;
           }
           try { localStorage.setItem('iqsion_shopify_store', storeUrl); } catch (_) {}
           authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
-          break; }
+          break;
+        }
         case 'google_ads':
           authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
@@ -336,15 +662,22 @@ export default function Settings() {
             const j = await urlRes.json().catch(() => ({}));
             const url = j?.url as string | undefined;
             if (url) {
+              toast({
+                title: "Yönlendiriliyor",
+                description: `Google Search Console'a bağlanılıyor. Bağlantı sonrası ${settings.initialIngestDays} günlük veriler otomatik çekilecek (1-3 dk sürebilir).`,
+              });
               window.location.href = url;
               return;
             } else {
+              setIsConnecting(false);
+              setLoadingPlatform(null);
               toast({ title: 'Hata', description: 'Yönlendirme alınamadı', variant: 'destructive' });
               return;
             }
           }
-          break;
         default:
+          setIsConnecting(false);
+          setLoadingPlatform(null);
           toast({
             title: "Hata",
             description: "Bu platform henüz desteklenmiyor",
@@ -353,21 +686,162 @@ export default function Settings() {
           return;
       }
 
+      if (!authUrl) {
+        console.error('[CONNECT] authUrl is empty for platform:', platformId);
+        setIsConnecting(false);
+        setLoadingPlatform(null);
+        toast({
+          title: "Hata",
+          description: "Yönlendirme URL'si oluşturulamadı",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('[CONNECT] Redirecting to:', authUrl);
+      
+      const platformName = platforms.find(p => p.id === platformId)?.name || platformId;
       toast({
         title: "Yönlendiriliyor",
-        description: `${platforms.find(p => p.id === platformId)?.name} OAuth sayfasına yönlendiriliyorsunuz`,
+        description: `${platformName} OAuth sayfasına yönlendiriliyorsunuz. Bağlantı sonrası ${settings.initialIngestDays} günlük veriler otomatik çekilecek (1-3 dk sürebilir).`,
       });
 
-      // OAuth sayfasına yönlendir
-      window.location.href = authUrl;
+      setTimeout(() => {
+        console.log('[CONNECT] Executing redirect to:', authUrl);
+        window.location.href = authUrl;
+      }, 500);
       
     } catch (error) {
+      console.error('[CONNECT] Error in executeConnectPlatform:', error);
+      setIsConnecting(false);
+      setLoadingPlatform(null);
       toast({
         title: "Hata",
-        description: "Platform bağlantısı başarısız",
+        description: error instanceof Error ? error.message : "Platform bağlantısı başarısız",
         variant: "destructive",
       });
     }
+  };
+
+  // OAuth bağlantısını direkt gerçekleştir (dialog açmadan)
+  const executeConnectPlatformDirect = async (platformId: string) => {
+    try {
+      if (!user) return;
+      
+      const uid = ((user as any)?.uid || (user as any)?.id) as string | undefined;
+      
+      // Loading state başlat
+      setIsConnecting(true);
+      setLoadingPlatform(platformId);
+      
+      let authUrl = '';
+      
+      switch (platformId) {
+        case 'shopify': {
+          const savedStore = (connections as any)?.shopify?.storeUrl as string | undefined;
+          let storeUrl = savedStore || localStorage.getItem('iqsion_shopify_store') || '';
+          if (!storeUrl) {
+            const name = prompt('Shopify mağaza adınızı girin (örn: mystore veya mystore.myshopify.com):') || '';
+            if (!name) {
+              setIsConnecting(false);
+              setLoadingPlatform(null);
+              return;
+            }
+            storeUrl = name;
+          }
+          storeUrl = storeUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          if (!/\.myshopify\.com$/i.test(storeUrl)) {
+            storeUrl = `${storeUrl}.myshopify.com`;
+          }
+          try { localStorage.setItem('iqsion_shopify_store', storeUrl); } catch (_) {}
+          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        }
+        case 'google_ads':
+          authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'meta_ads':
+          authUrl = `/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'google_analytics':
+          authUrl = `/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'tiktok':
+          authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'linkedin_ads':
+          authUrl = `/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          break;
+        case 'google_search_console':
+          {
+            const urlRes = await apiRequest('GET', `/api/auth/searchconsole/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`);
+            const j = await urlRes.json().catch(() => ({}));
+            const url = j?.url as string | undefined;
+            if (url) {
+              toast({
+                title: "Yönlendiriliyor",
+                description: `Google Search Console'a bağlanılıyor...`,
+              });
+              window.location.href = url;
+              return;
+            } else {
+              setIsConnecting(false);
+              setLoadingPlatform(null);
+              toast({ title: 'Hata', description: 'Yönlendirme alınamadı', variant: 'destructive' });
+              return;
+            }
+          }
+        default:
+          setIsConnecting(false);
+          setLoadingPlatform(null);
+          toast({
+            title: "Hata",
+            description: "Bu platform henüz desteklenmiyor",
+            variant: "destructive",
+          });
+          return;
+      }
+
+      if (!authUrl) {
+        console.error('[CONNECT DIRECT] authUrl is empty for platform:', platformId);
+        setIsConnecting(false);
+        setLoadingPlatform(null);
+        toast({
+          title: "Hata",
+          description: "Yönlendirme URL'si oluşturulamadı",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('[CONNECT DIRECT] Redirecting to:', authUrl);
+      
+      const platformName = platforms.find(p => p.id === platformId)?.name || platformId;
+      toast({
+        title: "Yönlendiriliyor",
+        description: `${platformName} OAuth sayfasına yönlendiriliyorsunuz...`,
+      });
+
+      setTimeout(() => {
+        console.log('[CONNECT DIRECT] Executing redirect to:', authUrl);
+        window.location.href = authUrl;
+      }, 300);
+      
+    } catch (error) {
+      console.error('[CONNECT DIRECT] Error:', error);
+      setIsConnecting(false);
+      setLoadingPlatform(null);
+      toast({
+        title: "Hata",
+        description: error instanceof Error ? error.message : "Platform bağlantısı başarısız",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Eski fonksiyon - artık sadece dialog açıyor
+  const handleConnectPlatform = (platformId: string) => {
+    openConnectDialog(platformId);
   };
 
   // Yardımcı: Shopify domain normalize et
@@ -429,16 +903,18 @@ export default function Settings() {
       
       toast({
         title: "Başarılı",
-        description: "Platform bağlantısı kesildi",
+        description: "Platform bağlantısı ve verileri kaldırıldı",
       });
       
-  queryClient.invalidateQueries({ queryKey: ['connections'] });
+      queryClient.invalidateQueries({ queryKey: ['connections'] });
+      setDisconnectPlatformId(null);
     } catch (error) {
       toast({
         title: "Hata",
         description: "Platform bağlantısı kesilemedi",
         variant: "destructive",
       });
+      setDisconnectPlatformId(null);
     }
   };
 
@@ -526,6 +1002,31 @@ export default function Settings() {
       // Make related queries stale so they refetch with new property
       queryClient.invalidateQueries({ queryKey: ['connections'] });
       queryClient.invalidateQueries({ queryKey: ['ga-summary'] });
+      
+      // İlk property seçiminde otomatik veri çek (initialIngestDays ayarına göre)
+      try {
+        // Firebase'den kullanıcı ayarlarını al (varsayılan 30 gün)
+        const settingsResp = await apiRequest('GET', `/api/settings?userId=${encodeURIComponent(uid)}`);
+        const settingsData = await settingsResp.json().catch(() => ({}));
+        const ingestDays = Number(settingsData?.initialIngestDays || 30);
+        const range = ingestDays <= 7 ? '7d' : ingestDays <= 30 ? '30d' : '90d';
+        
+        toast({
+          title: 'Veriler Çekiliyor',
+          description: `${ingestDays} günlük GA4 verileri arka planda çekiliyor. Bu işlem 1-2 dakika sürebilir.`,
+        });
+        
+        // Fire-and-forget data ingest
+        apiRequest('POST', '/api/ingest/ga4/refresh', {
+          userId: uid,
+          range,
+        }).then(async (ingestResp) => {
+          const ingestData = await ingestResp.json().catch(() => ({}));
+          if (ingestResp.ok) {
+            toast({ title: 'Başarılı', description: `GA4 verileri çekildi (${ingestData.insertedDaily || 0} gün)` });
+          }
+        }).catch(() => {});
+      } catch (_) {}
     } catch (e) {
       toast({ title: 'Hata', description: 'Property kaydedilemedi', variant: 'destructive' });
     }
@@ -724,7 +1225,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
 
             {/* User Profile */}
             <Card className="bg-slate-800 border-slate-700">
@@ -751,64 +1252,6 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Veri Saklama Süresi - TEK KART */}
-            <Card className="bg-slate-800 border-slate-700">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-white">
-                  <SettingsIcon className="w-5 h-5" /> Veri Saklama Süresi
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="text-sm text-slate-300">
-                  Büyük sorgu maliyetlerini kontrol etmek için verilerin saklanacağı süreyi seçin. Daha kısa süre daha düşük maliyet ve daha hızlı sorgu demektir.
-                </div>
-                
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase tracking-wide text-slate-400">İlk bağlantıda çekilecek gün</label>
-                    <Select value={initialIngestDays} onValueChange={setInitialIngestDays}>
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-full">
-                        <SelectValue placeholder="Süre seçin" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
-                        <SelectItem value="30">30 gün</SelectItem>
-                        <SelectItem value="60">60 gün</SelectItem>
-                        <SelectItem value="90">90 gün</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase tracking-wide text-slate-400">BigQuery'de saklanacak gün</label>
-                    <Select value={retentionDays} onValueChange={setRetentionDays}>
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-full">
-                        <SelectValue placeholder="Süre seçin" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
-                        <SelectItem value="30">30 gün</SelectItem>
-                        <SelectItem value="90">90 gün</SelectItem>
-                        <SelectItem value="180">180 gün</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <Button onClick={handleSaveDataSettings} disabled={saveSettingsMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-white">
-                  {saveSettingsMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Kaydediliyor...
-                    </>
-                  ) : (
-                    'Kaydet'
-                  )}
-                </Button>
-                
-                <div className="text-xs text-slate-400">
-                  Bu ayarlar TÜMM platformlar için geçerlidir (Meta Ads, Google Ads, Shopify, GA4).
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Platform Connections */}
             <Card className="bg-slate-800 border-slate-700">
               <CardHeader>
@@ -823,10 +1266,22 @@ export default function Settings() {
                     const connectionsMap = (connections as any as Record<string, PlatformConnection>) || {};
                     const connection = connectionsMap[platform.id];
                     const isConnected = connection?.isConnected || false;
+                    const isPlatformLoading = loadingPlatform === platform.id;
 
                     return (
-                      <Card key={platform.id} className="bg-slate-700 border-slate-600">
+                      <Card key={platform.id} className={`bg-slate-700 border-slate-600 relative ${isPlatformLoading ? 'opacity-70' : ''}`}>
                         <CardContent className="p-4">
+                          {/* Loading overlay */}
+                          {isPlatformLoading && (
+                            <div className="absolute inset-0 bg-slate-800/50 rounded-lg flex items-center justify-center z-10">
+                              <div className="flex flex-col items-center gap-2">
+                                <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+                                <span className="text-xs text-slate-300">
+                                  {isAccountChanging ? 'Hesap değiştiriliyor...' : 'Bağlanıyor...'}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               {platformIcons[platform.id]}
@@ -870,40 +1325,37 @@ export default function Settings() {
                                   </div>
                                 )}
 
-                                {/* Google Ads hesap seçimi */}
+                                {/* Google Ads hesap seçimi + Manuel veri güncelleme */}
                                 {platform.id === 'google_ads' && isConnected && (
-                                  <div className="mt-2">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
-                                      {(connections as any)?.google_ads?.accountId && (
-                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).google_ads.accountId}</span>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      {(googleAdAccounts?.accounts || []).length > 0 ? (
+                                  <div className="mt-2 space-y-2">
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                        {(connections as any)?.google_ads?.accountId && (
+                                          <span className="text-[10px] text-slate-500">Seçili: {(connections as any).google_ads.accountId}</span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {(googleAdAccounts?.accounts || []).length > 0 ? (
                                         <>
                                           <Select
                                             value={(connections as any)?.google_ads?.accountId || ''}
-                                            onValueChange={async (value) => {
-                                              const uid = (user as any)?.uid || (user as any)?.id;
-                                              try {
-                                                const resp = await apiRequest('POST', '/api/connections', {
-                                                  platform: 'google_ads',
-                                                  accountId: value,
-                                                  userId: uid,
-                                                });
-                                                await resp.json();
-                                                toast({ title: 'Başarılı', description: 'Google Ads hesabı güncellendi' });
-                                                queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                                  ...(prev || {}),
-                                                  google_ads: {
-                                                    ...((prev && prev.google_ads) || {}),
-                                                    accountId: value,
-                                                    isConnected: true,
-                                                  },
-                                                }));
-                                              } catch (e) {
-                                                toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                            onValueChange={(value) => {
+                                              const currentAccountId = (connections as any)?.google_ads?.accountId;
+                                              if (currentAccountId && currentAccountId !== value) {
+                                                // Hesap değişikliği - dialog aç
+                                                const currentAcc = (googleAdAccounts?.accounts || []).find((a: any) => a.id === currentAccountId);
+                                                const newAcc = (googleAdAccounts?.accounts || []).find((a: any) => a.id === value);
+                                                openAccountChangeDialog(
+                                                  'google_ads',
+                                                  value,
+                                                  newAcc?.displayName || value,
+                                                  currentAcc?.displayName || currentAccountId
+                                                );
+                                              } else {
+                                                // İlk hesap seçimi - dialog aç
+                                                const newAcc = (googleAdAccounts?.accounts || []).find((a: any) => a.id === value);
+                                                openAccountChangeDialog('google_ads', value, newAcc?.displayName || value);
                                               }
                                             }}
                                           >
@@ -931,29 +1383,15 @@ export default function Settings() {
                                             placeholder="Müşteri ID (örn: 123-456-7890)"
                                             defaultValue={(connections as any)?.google_ads?.accountId || ''}
                                             className="bg-slate-800 border-slate-700 text-slate-200 h-9 flex-1"
-                                            onKeyDown={async (e) => {
+                                            onKeyDown={(e) => {
                                               if (e.key === 'Enter') {
                                                 const value = (e.target as HTMLInputElement).value.replace(/\D/g, '');
                                                 if (!value) return;
-                                                const uid = (user as any)?.uid || (user as any)?.id;
-                                                try {
-                                                  const resp = await apiRequest('POST', '/api/connections', {
-                                                    platform: 'google_ads',
-                                                    accountId: value,
-                                                    userId: uid,
-                                                  });
-                                                  await resp.json();
-                                                  toast({ title: 'Kaydedildi', description: `Hesap ${value} seçildi` });
-                                                  queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                                    ...(prev || {}),
-                                                    google_ads: {
-                                                      ...((prev && prev.google_ads) || {}),
-                                                      accountId: value,
-                                                      isConnected: true,
-                                                    },
-                                                  }));
-                                                } catch (err) {
-                                                  toast({ title: 'Hata', description: 'Hesap kaydedilemedi', variant: 'destructive' });
+                                                const currentAccountId = (connections as any)?.google_ads?.accountId;
+                                                if (currentAccountId && currentAccountId !== value) {
+                                                  openAccountChangeDialog('google_ads', value, value, currentAccountId);
+                                                } else {
+                                                  openAccountChangeDialog('google_ads', value, value);
                                                 }
                                               }
                                             }}
@@ -969,61 +1407,60 @@ export default function Settings() {
                                           </Button>
                                         </>
                                       )}
-                                    </div>
-                                    {(connections as any)?.google_ads?.lastError === 'no_accessible_customers' && !(googleAdAccounts?.accounts || []).length && (
-                                      <p className="text-xs text-amber-400 mt-1">
-                                        ⚠️ Otomatik hesap listesi alınamadı. Lütfen Müşteri ID'nizi manuel girin veya Google Ads hesabınıza erişim izni verin.
-                                      </p>
-                                    )}
-                                  </div>
-                                )}
-                                {/* Meta Ads hesap seçimi */}
-                                {platform.id === 'meta_ads' && isConnected && (
-                                  <div className="mt-2">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <label className="block text-xs text-slate-400">Reklam Hesabı</label>
-                                      {(connections as any)?.meta_ads?.accountId && (
-                                        <span className="text-[10px] text-slate-500">Seçili: {(connections as any).meta_ads.accountId}</span>
+                                      </div>
+                                      {(connections as any)?.google_ads?.lastError === 'no_accessible_customers' && !(googleAdAccounts?.accounts || []).length && (
+                                        <p className="text-xs text-amber-400 mt-1">
+                                          ⚠️ Otomatik hesap listesi alınamadı. Lütfen Müşteri ID'nizi manuel girin veya Google Ads hesabınıza erişim izni verin.
+                                        </p>
                                       )}
                                     </div>
-                                    <Select
-                                      value={(connections as any)?.meta_ads?.accountId || ''}
-                                      onValueChange={async (value) => {
-                                        const uid = (user as any)?.uid || (user as any)?.id;
-                                        try {
-                                          const resp = await apiRequest('POST', '/api/connections', {
-                                            platform: 'meta_ads',
-                                            accountId: value,
-                                            userId: uid,
-                                          });
-                                          await resp.json();
-                                          toast({ title: 'Başarılı', description: 'Meta reklam hesabı güncellendi' });
-                                          // Update local cache immediately
-                                          queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                            ...(prev || {}),
-                                            meta_ads: {
-                                              ...((prev && prev.meta_ads) || {}),
-                                              accountId: value,
-                                              isConnected: true,
-                                            },
-                                          }));
-                                        } catch (e) {
-                                          toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
-                                        }
-                                      }}
-                                    >
-                                      <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
-                                        <SelectValue placeholder={!metaAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
-                                      </SelectTrigger>
-                                      <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
-                                        {!(metaAdAccounts?.data || []).length && (
-                                          <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                  </div>
+                                )}
+                                {/* Meta Ads hesap seçimi + Manuel veri güncelleme */}
+                                {platform.id === 'meta_ads' && isConnected && (
+                                  <div className="mt-2 space-y-2">
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-xs text-slate-400">Reklam Hesabı</label>
+                                        {(connections as any)?.meta_ads?.accountId && (
+                                          <span className="text-[10px] text-slate-500">Seçili: {(connections as any).meta_ads.accountId}</span>
                                         )}
-                                        {(metaAdAccounts?.data || []).map((acc: any) => (
-                                          <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.id}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
+                                      </div>
+                                      <Select
+                                        value={(connections as any)?.meta_ads?.accountId || ''}
+                                        disabled={isPlatformLoading}
+                                        onValueChange={(value) => {
+                                          const currentAccountId = (connections as any)?.meta_ads?.accountId;
+                                          if (currentAccountId && currentAccountId !== value) {
+                                            // Hesap değişikliği - dialog aç
+                                            const currentAcc = (metaAdAccounts?.data || []).find((a: any) => a.id === currentAccountId);
+                                            const newAcc = (metaAdAccounts?.data || []).find((a: any) => a.id === value);
+                                            openAccountChangeDialog(
+                                              'meta_ads',
+                                              value,
+                                              newAcc?.name || value,
+                                              currentAcc?.name || currentAccountId
+                                            );
+                                          } else {
+                                            // İlk hesap seçimi - dialog aç
+                                            const newAcc = (metaAdAccounts?.data || []).find((a: any) => a.id === value);
+                                            openAccountChangeDialog('meta_ads', value, newAcc?.name || value);
+                                          }
+                                        }}
+                                      >
+                                        <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">
+                                          <SelectValue placeholder={!metaAdAccounts ? 'Yükleniyor…' : 'Hesap seç'} />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-slate-800 border-slate-700 max-h-64 overflow-auto">
+                                          {!(metaAdAccounts?.data || []).length && (
+                                            <div className="px-3 py-2 text-slate-400 text-sm">Hesap bulunamadı</div>
+                                          )}
+                                          {(metaAdAccounts?.data || []).map((acc: any) => (
+                                            <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.id}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
                                   </div>
                                 )}
                                 {/* TikTok Ads hesap seçimi */}
@@ -1037,26 +1474,21 @@ export default function Settings() {
                                     </div>
                                     <Select
                                       value={(connections as any)?.tiktok?.accountId || ''}
-                                      onValueChange={async (value) => {
-                                        const uid = (user as any)?.uid || (user as any)?.id;
-                                        try {
-                                          const resp = await apiRequest('POST', '/api/connections', {
-                                            platform: 'tiktok',
-                                            accountId: value,
-                                            userId: uid,
-                                          });
-                                          await resp.json();
-                                          toast({ title: 'Başarılı', description: 'TikTok reklam hesabı güncellendi' });
-                                          queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                            ...(prev || {}),
-                                            tiktok: {
-                                              ...((prev && prev.tiktok) || {}),
-                                              accountId: value,
-                                              isConnected: true,
-                                            },
-                                          }));
-                                        } catch (e) {
-                                          toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                      onValueChange={(value) => {
+                                        const currentAccountId = (connections as any)?.tiktok?.accountId;
+                                        const accounts = tiktokAdAccounts?.data?.list || [];
+                                        if (currentAccountId && currentAccountId !== value) {
+                                          const currentAcc = accounts.find((a: any) => String(a.advertiser_id || a.id) === currentAccountId);
+                                          const newAcc = accounts.find((a: any) => String(a.advertiser_id || a.id) === value);
+                                          openAccountChangeDialog(
+                                            'tiktok',
+                                            value,
+                                            newAcc?.advertiser_name || newAcc?.name || value,
+                                            currentAcc?.advertiser_name || currentAcc?.name || currentAccountId
+                                          );
+                                        } else {
+                                          const newAcc = accounts.find((a: any) => String(a.advertiser_id || a.id) === value);
+                                          openAccountChangeDialog('tiktok', value, newAcc?.advertiser_name || newAcc?.name || value);
                                         }
                                       }}
                                     >
@@ -1088,26 +1520,21 @@ export default function Settings() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <Select
                                         value={(connections as any)?.linkedin_ads?.accountId || ''}
-                                        onValueChange={async (value) => {
-                                          const uid = (user as any)?.uid || (user as any)?.id;
-                                          try {
-                                            const resp = await apiRequest('POST', '/api/connections', {
-                                              platform: 'linkedin_ads',
-                                              accountId: value,
-                                              userId: uid,
-                                            });
-                                            await resp.json();
-                                            toast({ title: 'Başarılı', description: 'LinkedIn Ads hesabı güncellendi' });
-                                            queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                              ...(prev || {}),
-                                              linkedin_ads: {
-                                                ...((prev && prev.linkedin_ads) || {}),
-                                                accountId: value,
-                                                isConnected: true,
-                                              },
-                                            }));
-                                          } catch (e) {
-                                            toast({ title: 'Hata', description: 'Hesap seçimi kaydedilemedi', variant: 'destructive' });
+                                        onValueChange={(value) => {
+                                          const currentAccountId = (connections as any)?.linkedin_ads?.accountId;
+                                          const accounts = linkedinAccounts?.accounts || [];
+                                          if (currentAccountId && currentAccountId !== value) {
+                                            const currentAcc = accounts.find((a: any) => a.id === currentAccountId);
+                                            const newAcc = accounts.find((a: any) => a.id === value);
+                                            openAccountChangeDialog(
+                                              'linkedin_ads',
+                                              value,
+                                              newAcc?.name || value,
+                                              currentAcc?.name || currentAccountId
+                                            );
+                                          } else {
+                                            const newAcc = accounts.find((a: any) => a.id === value);
+                                            openAccountChangeDialog('linkedin_ads', value, newAcc?.name || value);
                                           }
                                         }}
                                       >
@@ -1126,29 +1553,15 @@ export default function Settings() {
                                       <Input
                                         placeholder="Hesap ID gir (örn: 1234567)"
                                         className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-44"
-                                        onKeyDown={async (e) => {
+                                        onKeyDown={(e) => {
                                           if (e.key === 'Enter') {
                                             const value = (e.target as HTMLInputElement).value.trim();
                                             if (!value) return;
-                                            const uid = (user as any)?.uid || (user as any)?.id;
-                                            try {
-                                              const resp = await apiRequest('POST', '/api/connections', {
-                                                platform: 'linkedin_ads',
-                                                accountId: value,
-                                                userId: uid,
-                                              });
-                                              await resp.json();
-                                              toast({ title: 'Kaydedildi', description: `Hesap ${value} seçildi` });
-                                              queryClient.setQueryData(['connections', uid], (prev: any) => ({
-                                                ...(prev || {}),
-                                                linkedin_ads: {
-                                                  ...((prev && prev.linkedin_ads) || {}),
-                                                  accountId: value,
-                                                  isConnected: true,
-                                                },
-                                              }));
-                                            } catch (err) {
-                                              toast({ title: 'Hata', description: 'Hesap kaydedilemedi', variant: 'destructive' });
+                                            const currentAccountId = (connections as any)?.linkedin_ads?.accountId;
+                                            if (currentAccountId && currentAccountId !== value) {
+                                              openAccountChangeDialog('linkedin_ads', value, value, currentAccountId);
+                                            } else {
+                                              openAccountChangeDialog('linkedin_ads', value, value);
                                             }
                                           }
                                         }}
@@ -1160,47 +1573,49 @@ export default function Settings() {
                                 {platform.id === 'google_search_console' && isConnected && (
                                   <SearchConsoleSites connections={connections as any} />
                                 )}
-                                {/* Shopify mağaza düzenleme */}
+                                {/* Shopify mağaza düzenleme + Manuel veri güncelleme */}
                                 {platform.id === 'shopify' && (
                                   <div className="mt-2 space-y-2">
-                                    <div className="flex items-center justify-between text-xs text-slate-400">
-                                      <span>Mağaza</span>
-                                      {!isEditingShopifyStore && (
-                                        <button
-                                          className="underline hover:text-slate-300"
-                                          onClick={() => {
-                                            const current = ((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '';
-                                            setShopifyStoreDraft(current);
-                                            setIsEditingShopifyStore(true);
-                                          }}
-                                        >
-                                          Mağazayı değiştir
-                                        </button>
+                                    <div>
+                                      <div className="flex items-center justify-between text-xs text-slate-400">
+                                        <span>Mağaza</span>
+                                        {!isEditingShopifyStore && (
+                                          <button
+                                            className="underline hover:text-slate-300"
+                                            onClick={() => {
+                                              const current = ((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '';
+                                              setShopifyStoreDraft(current);
+                                              setIsEditingShopifyStore(true);
+                                            }}
+                                          >
+                                            Mağazayı değiştir
+                                          </button>
+                                        )}
+                                      </div>
+                                      {!isEditingShopifyStore ? (
+                                        <div className="text-sm text-slate-300">
+                                          {((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '—'}
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Input
+                                            placeholder="mystore veya mystore.myshopify.com"
+                                            value={shopifyStoreDraft}
+                                            onChange={(e) => setShopifyStoreDraft(e.target.value)}
+                                            className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-72"
+                                          />
+                                          <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleSaveShopifyStore}>
+                                            Kaydet
+                                          </Button>
+                                          <Button size="sm" variant="outline" className="border-slate-600 text-slate-300" onClick={() => setIsEditingShopifyStore(false)}>
+                                            İptal
+                                          </Button>
+                                          <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={handleClearShopifyStore}>
+                                            Mağaza bilgisini temizle
+                                          </Button>
+                                        </div>
                                       )}
                                     </div>
-                                    {!isEditingShopifyStore ? (
-                                      <div className="text-sm text-slate-300">
-                                        {((connections as any)?.shopify?.storeUrl as string) || localStorage.getItem('iqsion_shopify_store') || '—'}
-                                      </div>
-                                    ) : (
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <Input
-                                          placeholder="mystore veya mystore.myshopify.com"
-                                          value={shopifyStoreDraft}
-                                          onChange={(e) => setShopifyStoreDraft(e.target.value)}
-                                          className="bg-slate-800 border-slate-700 text-slate-200 h-9 w-72"
-                                        />
-                                        <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleSaveShopifyStore}>
-                                          Kaydet
-                                        </Button>
-                                        <Button size="sm" variant="outline" className="border-slate-600 text-slate-300" onClick={() => setIsEditingShopifyStore(false)}>
-                                          İptal
-                                        </Button>
-                                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={handleClearShopifyStore}>
-                                          Mağaza bilgisini temizle
-                                        </Button>
-                                      </div>
-                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1212,31 +1627,13 @@ export default function Settings() {
                                     <CheckCircle className="w-3 h-3 mr-1" />
                                     Bağlı
                                   </Badge>
-                                  {platform.id === 'meta_ads' && (
-                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestMetaConnection}>
-                                      Bağlantıyı test et
-                                    </Button>
-                                  )}
-                                  {platform.id === 'google_ads' && (
-                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestGoogleAdsConnection}>
-                                      Bağlantıyı test et
-                                    </Button>
-                                  )}
-                                  {platform.id === 'linkedin_ads' && (
-                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestLinkedinConnection}>
-                                      Bağlantıyı test et
-                                    </Button>
-                                  )}
-                                  {platform.id === 'shopify' && (
-                                    <Button size="sm" className="bg-slate-600 hover:bg-slate-500 text-white" onClick={handleTestShopifyConnection}>
-                                      Bağlantıyı test et
-                                    </Button>
-                                  )}
+
                                   <Button 
                                     size="sm" 
                                     variant="outline" 
                                     className="border-slate-600 text-slate-300"
-                                    onClick={() => handleDisconnectPlatform(platform.id)}
+                                    onClick={() => setDisconnectPlatformId(platform.id)}
+                                    disabled={isPlatformLoading}
                                   >
                                     <X className="w-4 h-4" />
                                   </Button>
@@ -1245,9 +1642,22 @@ export default function Settings() {
                                 <Button 
                                   size="sm" 
                                   className="bg-blue-600 hover:bg-blue-700 text-white"
-                                  onClick={() => handleConnectPlatform(platform.id)}
+                                  disabled={isPlatformLoading || isConnecting}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleConnectPlatform(platform.id);
+                                  }}
+                                  type="button"
                                 >
-                                  Bağla
+                                  {isPlatformLoading ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                      Bağlanıyor...
+                                    </>
+                                  ) : (
+                                    'Bağla'
+                                  )}
                                 </Button>
                               )}
                             </div>
@@ -1452,6 +1862,52 @@ export default function Settings() {
                 </Button>
               </CardContent>
             </Card>
+
+            {/* Disconnect Confirmation Dialog */}
+            <AlertDialog open={disconnectPlatformId !== null} onOpenChange={(open: boolean) => !open && setDisconnectPlatformId(null)}>
+              <AlertDialogContent className="bg-slate-800 border-slate-700">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="text-white">Bağlantıyı Kaldır</AlertDialogTitle>
+                  <AlertDialogDescription className="text-slate-300">
+                    {disconnectPlatformId === 'google_analytics' 
+                      ? 'Google Analytics bağlantısını kaldırmak istediğinize emin misiniz? Bu işlem geri alınamaz ve BigQuery\'deki tüm GA4 verileri silinecektir.'
+                      : 'Bu platform bağlantısını kaldırmak istediğinize emin misiniz? Bu işlem geri alınamaz ve BigQuery\'deki tüm veriler silinecektir.'
+                    }
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="bg-slate-700 text-white border-slate-600 hover:bg-slate-600">İptal</AlertDialogCancel>
+                  <AlertDialogAction 
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                    onClick={() => disconnectPlatformId && handleDisconnectPlatform(disconnectPlatformId)}
+                  >
+                    Evet, Kaldır
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Data Settings Dialog - İlk bağlantı ve hesap değişikliği için */}
+            <DataSettingsDialog
+              open={dataSettingsDialogOpen}
+              onClose={() => setDataSettingsDialogOpen(false)}
+              onConfirm={handleDataSettingsConfirm}
+              platformName={dataSettingsDialogPlatformName}
+              mode={dataSettingsDialogMode}
+              currentAccountName={dataSettingsDialogCurrentAccount}
+              newAccountName={dataSettingsDialogNewAccount}
+            />
+
+            {/* Account Selection Dialog - OAuth sonrası hesap seçimi için */}
+            <AccountSelectionDialog
+              open={accountSelectionDialogOpen}
+              onClose={() => setAccountSelectionDialogOpen(false)}
+              onConfirm={handleAccountSelectionConfirm}
+              platformName={accountSelectionPlatformName}
+              platformId={accountSelectionPlatform}
+              accounts={getAccountsForPlatform(accountSelectionPlatform)}
+              isLoadingAccounts={isLoadingAccountsForPlatform(accountSelectionPlatform)}
+            />
     </div>
   );
 }
