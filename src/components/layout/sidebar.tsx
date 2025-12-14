@@ -42,7 +42,7 @@ import { useIsMobile } from "../../hooks/use-mobile";
 import { navigation } from "../../lib/navigation";
 import { cn } from "../../lib/utils";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { useTheme } from "../../contexts/ThemeContext";
+import { useTheme } from "../theme-provider";
 
 const iconMap = {
   BarChart3,
@@ -86,7 +86,11 @@ export default function Sidebar() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const isMobile = useIsMobile();
   const { language, t } = useLanguage();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
+  
+  const toggleTheme = () => {
+    setTheme(theme === "dark" ? "light" : "dark");
+  };
 
   const toggleSidebar = () => {
     if (isMobile) {

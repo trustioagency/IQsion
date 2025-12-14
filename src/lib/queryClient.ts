@@ -16,9 +16,32 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
+  
+  // Admin key'i sadece /api/ingest ve /api/cron endpoint'lerine gönder
+  // Production'da build time'da inject edilir, yoksa boş string
+  const requiresAdminKey = url.includes('/api/ingest') || url.includes('/api/cron');
+  
+  if (requiresAdminKey) {
+    try {
+      const adminKey = (import.meta as any)?.env?.VITE_ADMIN_API_KEY || '';
+      console.log('[apiRequest] Admin key check:', { 
+        hasKey: !!adminKey, 
+        keyLength: adminKey?.length || 0,
+        url,
+        method 
+      });
+      if (adminKey && typeof adminKey === 'string') {
+        headers['x-admin-key'] = adminKey;
+      }
+    } catch (e) {
+      console.error('[apiRequest] Error accessing admin key:', e);
+    }
+  }
+  
   const res = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });

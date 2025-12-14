@@ -495,12 +495,7 @@ router.get('/api/attribution/sources', async (req, res) => {
 
     const baseProto = req.protocol || 'http';
     const host = (req.get('host') || 'localhost:5001').replace('127.0.0.1', 'localhost');
-      await admin.database().ref(`platformConnections/${userId}/shopify`).update({
-        storeUrl,
-        updatedAt: new Date().toISOString(),
-        lastSyncAt: null,
-        lastIngestRange: null,
-      });
+    const baseUrl = `${baseProto}://${host}`;
     // Helper to normalize referrers to channels
     const normalizeChannel = (ref: string | null | undefined, sourceName?: string | null): string => {
       const s = (String(ref || '').toLowerCase());
@@ -2788,13 +2783,18 @@ router.get('/api/googleads/diagnose', async (req, res) => {
     try {
       const userId = (req.query.userId || req.body.userId || 'test-user') as string;
       const platform = (req.query.platform || req.body.platform) as string;
-      const accountId = (req.query.accountId || req.body.accountId) as string;
+      let accountId = (req.query.accountId || req.body.accountId) as string;
       
       if (!platform) {
         return res.status(400).json({ message: 'Platform belirtilmedi.' });
       }
       if (!accountId) {
         return res.status(400).json({ message: 'Account ID belirtilmedi.' });
+      }
+
+      // Google Ads accountId'leri tireleri temizle (BigQuery'de tiresiz saklanıyor)
+      if (platform === 'google_ads') {
+        accountId = String(accountId).replace(/-/g, '');
       }
 
       const bq = getBigQuery();
@@ -2926,7 +2926,12 @@ router.get('/api/googleads/diagnose', async (req, res) => {
           // Regular platform - get accountId first, then delete from metrics_daily
           const platformSnapshot = await refBase.child(platform).once('value');
           const platformData = platformSnapshot.val();
-          const accountId = platformData?.accountId;
+          let accountId = platformData?.accountId;
+          
+          // Google Ads accountId'leri tireleri temizle (BigQuery'de tiresiz saklanıyor)
+          if (platform === 'google_ads' && accountId) {
+            accountId = String(accountId).replace(/-/g, '');
+          }
           
           if (accountId) {
             // accountId varsa spesifik sil
@@ -3754,6 +3759,29 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       const metaRef = admin.database().ref(`platformConnections/${userId}/meta_ads`);
       const snap = await metaRef.once('value');
       const existing = snap.val() || {};
+      const oldAccountId = existing.accountId;
+      
+      // Eski hesap varsa ve farklıysa, eski hesabın BigQuery verilerini sil
+      if (oldAccountId && oldAccountId !== accountId) {
+        try {
+          const bq = getBigQuery();
+          const dataset = process.env.BQ_DATASET || 'iqsion';
+          const deleteOldSql = `
+            DELETE FROM \`${bq.projectId}.${dataset}.metrics_daily\`
+            WHERE userId = @userId AND source = 'meta_ads' AND accountId = @oldAccountId
+          `;
+          const [job] = await bq.createQueryJob({
+            query: deleteOldSql,
+            params: { userId, oldAccountId },
+            location: process.env.BQ_LOCATION || 'US',
+          });
+          await job.getQueryResults();
+          console.log(`[ADMIN] Deleted old Meta account data: ${oldAccountId} for user ${userId}`);
+        } catch (delErr) {
+          console.error('[ADMIN] Failed to delete old Meta account data:', delErr);
+        }
+      }
+      
       await metaRef.update({
         accountId,
         updatedAt: new Date().toISOString(),
@@ -4152,7 +4180,7 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       }
       const cur = new Date(startISO);
       const end = new Date(endISO);
-      const seq: Array<{ date: string; sessions: number; avgSessionDurationSec: number; activeUsers: number }> = [];
+      const seq: Array<{ date: string; sessions: number; avgSessionDurationSec: number; activeUsers: number; newUsers: number; eventCount: number }> = [];
       while (cur <= end) {
         const key = cur.toISOString().slice(0,10);
         const v = map[key] || { sessions: 0, avgSessionDurationSec: 0, activeUsers: 0, newUsers: 0, eventCount: 0 };
@@ -5694,10 +5722,15 @@ router.post('/api/cron/realtime-sync', async (req, res) => {
         }
       }
       
-      // GA4
-      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+      // GA4 (dünün verisini çek çünkü GA4 UTC timezone kullanıyor ve processing delay var)
+      const gaConn = platforms.google_analytics || platforms.analytics;
+      if (gaConn?.isConnected && gaConn?.refreshToken) {
         try {
-          const body = JSON.stringify({ userId, from, to });
+          // GA4 için dünü çek (Türkiye timezone'unda dün = GA4'te bugün)
+          const yesterday = new Date(turkeyNow);
+          yesterday.setDate(yesterday.getDate() - 1);
+          const ga4Date = fmt(yesterday);
+          const body = JSON.stringify({ userId, from: ga4Date, to: ga4Date });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5809,7 +5842,7 @@ router.post('/api/cron/daily-close', async (req, res) => {
           results.push({ userId, platform: 'shopify', status: 'success', inserted: data.inserted || 0 });
           
           await admin.database().ref(`platformConnections/${userId}/shopify`).update({
-            lastDayClose: fmt(today),
+            lastDayClose: today,
             lastSyncAt: new Date().toISOString(),
           });
         } catch (err: any) {
@@ -5817,10 +5850,15 @@ router.post('/api/cron/daily-close', async (req, res) => {
         }
       }
       
-      // GA4
-      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+      // GA4 (dünün verisini çek çünkü GA4 UTC timezone kullanıyor ve processing delay var)
+      const gaConn = platforms.google_analytics || platforms.analytics;
+      if (gaConn?.isConnected && gaConn?.refreshToken) {
         try {
-          const body = JSON.stringify({ userId, from, to });
+          // GA4 için dünü çek (Türkiye timezone'unda dün = GA4'te bugün)
+          const yesterday = new Date(turkeyNow);
+          yesterday.setDate(yesterday.getDate() - 1);
+          const ga4Date = fmt(yesterday);
+          const body = JSON.stringify({ userId, from: ga4Date, to: ga4Date });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5829,8 +5867,9 @@ router.post('/api/cron/daily-close', async (req, res) => {
           const data = await ingestRes.json();
           results.push({ userId, platform: 'ga4', status: 'success', inserted: data.inserted || 0 });
           
-          await admin.database().ref(`platformConnections/${userId}/analytics`).update({
-            lastDayClose: fmt(today),
+          const gaKey = platforms.google_analytics ? 'google_analytics' : 'analytics';
+          await admin.database().ref(`platformConnections/${userId}/${gaKey}`).update({
+            lastDayClose: today,
             lastSyncAt: new Date().toISOString(),
           });
         } catch (err: any) {
@@ -5844,7 +5883,7 @@ router.post('/api/cron/daily-close', async (req, res) => {
       type: 'daily_close',
       message: 'Daily close completed - all days finalized', 
       timestamp: new Date().toISOString(),
-      closedDate: fmt(today),
+      closedDate: today,
       totalJobs: results.length,
       successful: results.filter(r => r.status === 'success').length,
       failed: results.filter(r => r.status === 'error').length,
@@ -5937,9 +5976,10 @@ router.post('/api/cron/daily-sync', async (req, res) => {
       }
       
       // GA4
-      if (platforms.analytics?.isConnected && platforms.analytics?.refreshToken) {
+      const gaConn = platforms.google_analytics || platforms.analytics;
+      if (gaConn?.isConnected && gaConn?.refreshToken) {
         try {
-          const body = JSON.stringify({ userId, from: fmt(syncStart), to: fmt(yesterday) });
+          const body = JSON.stringify({ userId, from: syncStart, to: yesterday });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },

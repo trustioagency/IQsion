@@ -59,5 +59,16 @@ export function useAuth() {
     user,
     isLoading,
     isAuthenticated: !!user,
+    logout: () => {
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem("userUid");
+          window.location.href = "/auth";
+        } catch (error) {
+          console.error("Logout error:", error);
+          window.location.href = "/auth";
+        }
+      }
+    },
   };
 }

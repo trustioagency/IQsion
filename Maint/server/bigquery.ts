@@ -162,6 +162,7 @@ export async function insertMetrics(rows: MetricsRow[]): Promise<{ inserted: num
       ON target.userId = source.userId 
          AND target.source = source.source 
          AND target.date = source.date
+         AND (target.accountId IS NULL AND source.accountId IS NULL OR target.accountId = source.accountId)
          AND (target.campaignId IS NULL AND source.campaignId IS NULL OR target.campaignId = source.campaignId)
          AND (target.adGroupId IS NULL AND source.adGroupId IS NULL OR target.adGroupId = source.adGroupId)
       WHEN MATCHED THEN
