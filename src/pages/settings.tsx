@@ -21,7 +21,7 @@ import { AccountSelectionDialog } from "../components/AccountSelectionDialog";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
 import { isUnauthorizedError } from "../lib/authUtils";
-import { apiRequest, queryClient } from "../lib/queryClient";
+import { apiRequest, queryClient, API_BASE } from "../lib/queryClient";
 import { type User as UserType } from "../types/user";
 import { 
   User, 
@@ -557,7 +557,9 @@ export default function Settings() {
     
     try {
       // 1. Eski hesabın verilerini BigQuery'den sil
-      const currentAccountId = (connections as any)?.[platformId]?.accountId;
+      const currentAccountId = (platformId === 'google_analytics') 
+        ? (connections as any)?.[platformId]?.propertyId
+        : (connections as any)?.[platformId]?.accountId;
       if (currentAccountId && currentAccountId !== newAccountId) {
         await apiRequest('POST', '/api/bigquery/cleanup', {
           userId: uid,
@@ -566,33 +568,61 @@ export default function Settings() {
         });
       }
 
-      // 2. Yeni hesabı kaydet
-      const resp = await apiRequest('POST', '/api/connections', {
-        platform: platformId,
-        accountId: newAccountId,
-        userId: uid,
-      });
-      await resp.json();
+      // 2. Yeni hesabı kaydet (Google Analytics için propertyId)
+      if (platformId === 'google_analytics') {
+        const resp = await apiRequest('POST', '/api/connections', {
+          platform: platformId,
+          propertyId: newAccountId,
+          userId: uid,
+        });
+        await resp.json();
+      } else {
+        const resp = await apiRequest('POST', '/api/connections', {
+          platform: platformId,
+          accountId: newAccountId,
+          userId: uid,
+        });
+        await resp.json();
+      }
 
       // 3. Yeni hesap için veri çek
-      await apiRequest('POST', '/api/ingest/refresh', {
-        userId: uid,
-        platform: platformId,
-        range: settings.initialIngestDays <= 7 ? '7d' : settings.initialIngestDays <= 30 ? '30d' : '90d',
-      });
+      if (platformId === 'google_analytics') {
+        await apiRequest('POST', '/api/ingest/ga4/refresh', {
+          userId: uid,
+          range: settings.initialIngestDays <= 7 ? '7d' : settings.initialIngestDays <= 30 ? '30d' : '90d',
+        });
+      } else {
+        await apiRequest('POST', '/api/ingest/refresh', {
+          userId: uid,
+          platform: platformId,
+          range: settings.initialIngestDays <= 7 ? '7d' : settings.initialIngestDays <= 30 ? '30d' : '90d',
+        });
+      }
 
       toast({ title: 'Başarılı', description: `${getPlatformName(platformId)} hesabı değiştirildi ve ${settings.initialIngestDays} günlük veriler çekildi` });
       
       // Cache'i güncelle
-      queryClient.setQueryData(['connections', uid], (prev: any) => ({
-        ...(prev || {}),
-        [platformId]: {
-          ...((prev && prev[platformId]) || {}),
-          accountId: newAccountId,
-          isConnected: true,
-        },
-      }));
+      if (platformId === 'google_analytics') {
+        queryClient.setQueryData(['connections', uid], (prev: any) => ({
+          ...(prev || {}),
+          [platformId]: {
+            ...((prev && prev[platformId]) || {}),
+            propertyId: newAccountId,
+            isConnected: true,
+          },
+        }));
+      } else {
+        queryClient.setQueryData(['connections', uid], (prev: any) => ({
+          ...(prev || {}),
+          [platformId]: {
+            ...((prev && prev[platformId]) || {}),
+            accountId: newAccountId,
+            isConnected: true,
+          },
+        }));
+      }
       queryClient.invalidateQueries({ queryKey: ['connections'] });
+      queryClient.invalidateQueries({ queryKey: ['ga-summary'] });
     } catch (e: any) {
       toast({ title: 'Hata', description: e?.message || 'Hesap değiştirilemedi', variant: 'destructive' });
     } finally {
@@ -638,23 +668,23 @@ export default function Settings() {
             storeUrl = `${storeUrl}.myshopify.com`;
           }
           try { localStorage.setItem('iqsion_shopify_store', storeUrl); } catch (_) {}
-          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         }
         case 'google_ads':
-          authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'meta_ads':
-          authUrl = `/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_analytics':
-          authUrl = `/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'tiktok':
-          authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'linkedin_ads':
-          authUrl = `/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_search_console':
           {
@@ -754,23 +784,23 @@ export default function Settings() {
             storeUrl = `${storeUrl}.myshopify.com`;
           }
           try { localStorage.setItem('iqsion_shopify_store', storeUrl); } catch (_) {}
-          authUrl = `/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/shopify/connect?storeUrl=${encodeURIComponent(storeUrl)}${uid ? `&userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         }
         case 'google_ads':
-          authUrl = `/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/googleads/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'meta_ads':
-          authUrl = `/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/meta/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_analytics':
-          authUrl = `/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/google/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'tiktok':
-          authUrl = `/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/tiktok/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'linkedin_ads':
-          authUrl = `/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
+          authUrl = `${API_BASE}/api/auth/linkedin/connect${uid ? `?userId=${encodeURIComponent(uid)}` : ''}`;
           break;
         case 'google_search_console':
           {
@@ -1306,8 +1336,26 @@ export default function Settings() {
                                     <Select
                                       value={selectedGaPropertyId || ''}
                                       onValueChange={(value) => {
-                                        setSelectedGaPropertyId(value);
-                                        handleSaveGoogleAnalyticsProperty(value);
+                                        // Eğer property değiştiyse confirmation dialog aç (Meta Ads gibi)
+                                        const currentPropertyId = (connections as any)?.google_analytics?.propertyId;
+                                        console.log('GA Property Change:', { currentPropertyId, newValue: value, connections });
+                                        
+                                        if (currentPropertyId && currentPropertyId !== value) {
+                                          const currentProp = (gaProperties?.properties || []).find((p: any) => p.id === currentPropertyId);
+                                          const newProp = (gaProperties?.properties || []).find((p: any) => p.id === value);
+                                          console.log('Opening dialog:', { currentProp, newProp });
+                                          openAccountChangeDialog(
+                                            'google_analytics',
+                                            value,
+                                            newProp?.name || value,
+                                            currentProp?.name || currentPropertyId
+                                          );
+                                        } else {
+                                          // İlk property seçimi, direkt kaydet
+                                          console.log('First property selection, saving directly');
+                                          setSelectedGaPropertyId(value);
+                                          handleSaveGoogleAnalyticsProperty(value);
+                                        }
                                       }}
                                     >
                                       <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200 h-9">

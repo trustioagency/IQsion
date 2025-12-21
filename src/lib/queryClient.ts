@@ -7,8 +7,10 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-const API_BASE = (typeof window !== 'undefined' && window.location && window.location.origin)
-  ? (window.location.port === '5173' ? 'http://127.0.0.1:5001' : '')
+export const API_BASE = (typeof window !== 'undefined' && window.location && window.location.origin)
+  ? (window.location.port === '5173' 
+      ? 'http://127.0.0.1:5001' 
+      : 'https://iqsion-api-839632752295.us-central1.run.app')
   : 'http://127.0.0.1:5001';
 
 export async function apiRequest(

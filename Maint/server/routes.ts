@@ -4242,6 +4242,14 @@ router.get('/api/googleads/diagnose', async (req, res) => {
 
   // Google OAuth callback endpoint
   router.get('/api/auth/google/callback', async (req, res) => {
+    console.log('[GA CALLBACK] Received callback:', {
+      hasCode: !!req.query.code,
+      hasState: !!req.query.state,
+      hasError: !!req.query.error,
+      error: req.query.error,
+      errorDescription: req.query.error_description
+    });
+    
     const code = req.query.code;
     let propertyId = req.query.propertyId;
     const stateParam = typeof req.query.state === 'string' ? req.query.state : '';
@@ -4260,14 +4268,24 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         // yoksay
       }
     }
+    
     if (!code) {
-  return settingsRedirect(res, req, 'google_analytics', false);
+      console.error('[GA CALLBACK] No authorization code received');
+      return settingsRedirect(res, req, 'google_analytics', false);
     }
+    
     try {
       const params = new URLSearchParams();
       params.append('code', code as string);
       const gaClientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
       const gaClientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+      
+      console.log('[GA CALLBACK] Exchanging code for token:', {
+        hasClientId: !!gaClientId,
+        hasClientSecret: !!gaClientSecret,
+        userId: stateUserId
+      });
+      
       params.append('client_id', gaClientId);
       params.append('client_secret', gaClientSecret);
       const effectiveRedirectUri = (process.env.GOOGLE_REDIRECT_URI || '').trim() || `${buildAppBase(req)}/api/auth/google/callback`;
@@ -4279,7 +4297,9 @@ router.get('/api/googleads/diagnose', async (req, res) => {
         body: params.toString(),
       });
       const tokenData = await tokenRes.json();
+      
       if (tokenData.error) {
+        console.error('[GA CALLBACK] Token exchange failed:', tokenData);
         return res.redirect('/settings?connection=error&platform=google_analytics');
       }
       const userId = (stateUserId || (typeof req.query.userId === 'string' ? req.query.userId : null)) || 'test-user';
@@ -4340,6 +4360,7 @@ router.get('/api/googleads/diagnose', async (req, res) => {
   router.get('/api/auth/google/connect', async (req, res) => {
     const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
     if (!clientId) {
+      console.error('[GOOGLE AUTH] No GOOGLE_CLIENT_ID configured');
       // UI akışını bozmayalım; Settings'e hata ile dönelim
       return settingsRedirect(res, req, 'google_analytics', false);
     }
@@ -4366,6 +4387,14 @@ router.get('/api/googleads/diagnose', async (req, res) => {
       `&prompt=consent` +
       `&state=${state}`;
     if (!redirectUri) return res.status(500).json({ message: 'GOOGLE_REDIRECT_URI is not configured and computed redirect failed.' });
+    
+    console.log('[GOOGLE AUTH] Redirecting to Google OAuth:', {
+      userId: uid,
+      clientId: clientId.substring(0, 20) + '...',
+      redirectUri,
+      authUrl: authUrl.substring(0, 100) + '...'
+    });
+    
     res.redirect(authUrl);
   });
 /* ===================== LINKEDIN ADS INTEGRATION (OAuth + Analytics) ===================== */
@@ -4950,8 +4979,8 @@ router.post('/api/ingest/ga4', async (req, res) => {
       const dataset = process.env.BQ_DATASET || 'iqsion';
       const params = { userId: uid, start: startDate, end: endDate, propertyId };
       const queries = [
-        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND (propertyId IS NULL OR propertyId = @propertyId)`,
-        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND (propertyId IS NULL OR propertyId = @propertyId)`
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND propertyId = @propertyId`,
+        `DELETE FROM \`${bq.projectId}.${dataset}.ga4_geo_daily\` WHERE userId = @userId AND date BETWEEN DATE(@start) AND DATE(@end) AND propertyId = @propertyId`
       ];
       for (const sql of queries) {
         const [job] = await bq.createQueryJob({
@@ -4961,6 +4990,7 @@ router.post('/api/ingest/ga4', async (req, res) => {
         });
         await job.getQueryResults();
       }
+      console.log(`[GA4 INGEST] Deleted old data for ${uid}/${propertyId} from ${startDate} to ${endDate}`);
     } catch (err) {
       console.error('[GA4 INGEST] Delete old GA4 data failed:', err);
     }
@@ -5062,7 +5092,16 @@ router.post('/api/ingest/ga4', async (req, res) => {
         }
       } catch (_) {}
     }
-    if (!dailyResp.ok) return res.status(500).json({ message: 'GA4 daily report failed', details: dailyJson });
+    if (!dailyResp.ok) {
+      console.error('[GA4 INGEST] Daily report failed:', {
+        status: dailyResp.status,
+        statusText: dailyResp.statusText,
+        propertyId,
+        userId: uid,
+        details: dailyJson
+      });
+      return res.status(500).json({ message: 'GA4 daily report failed', details: dailyJson });
+    }
     const dailyRows = Array.isArray(dailyJson.rows) ? dailyJson.rows : [];
     const dailyToInsert = dailyRows.map((r: any) => {
       const d = (r.dimensionValues?.[0]?.value || '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
@@ -5722,15 +5761,12 @@ router.post('/api/cron/realtime-sync', async (req, res) => {
         }
       }
       
-      // GA4 (dünün verisini çek çünkü GA4 UTC timezone kullanıyor ve processing delay var)
+      // GA4 (bugünün verisini çek - GA4 realtime veri sağlıyor)
       const gaConn = platforms.google_analytics || platforms.analytics;
       if (gaConn?.isConnected && gaConn?.refreshToken) {
         try {
-          // GA4 için dünü çek (Türkiye timezone'unda dün = GA4'te bugün)
-          const yesterday = new Date(turkeyNow);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const ga4Date = fmt(yesterday);
-          const body = JSON.stringify({ userId, from: ga4Date, to: ga4Date });
+          // GA4 için bugünü çek (Türkiye timezone)
+          const body = JSON.stringify({ userId, from: today, to: today });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -5854,11 +5890,8 @@ router.post('/api/cron/daily-close', async (req, res) => {
       const gaConn = platforms.google_analytics || platforms.analytics;
       if (gaConn?.isConnected && gaConn?.refreshToken) {
         try {
-          // GA4 için dünü çek (Türkiye timezone'unda dün = GA4'te bugün)
-          const yesterday = new Date(turkeyNow);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const ga4Date = fmt(yesterday);
-          const body = JSON.stringify({ userId, from: ga4Date, to: ga4Date });
+          // GA4 için bugünü çek (Türkiye timezone)
+          const body = JSON.stringify({ userId, from: today, to: today });
           const ingestRes = await fetchWithTimeout(`${buildApiBase(req)}/api/ingest/ga4`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-admin-key': process.env.ADMIN_API_KEY || '' },
@@ -6003,6 +6036,69 @@ router.post('/api/cron/daily-sync', async (req, res) => {
     });
   } catch (e: any) {
     return res.status(500).json({ message: 'Daily sync failed', error: e.message });
+  }
+});
+
+// ===== DEBUG: Check GA4 duplicates =====
+router.get('/api/debug/ga4-duplicates', async (req, res) => {
+  try {
+    const userId = String(req.query.userId || '');
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    const bq = getBigQuery();
+    const dataset = process.env.BQ_DATASET || 'iqsion';
+
+    // Check for duplicates (same date, same propertyId)
+    const duplicateQuery = `
+      SELECT 
+        date,
+        propertyId,
+        COUNT(*) as row_count
+      FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+      WHERE userId = @userId
+      GROUP BY date, propertyId
+      HAVING COUNT(*) > 1
+      ORDER BY date DESC
+      LIMIT 50
+    `;
+
+    const [duplicates] = await bq.query({
+      query: duplicateQuery,
+      params: { userId },
+      location: process.env.BQ_LOCATION || 'US',
+    });
+
+    // Get overall stats
+    const statsQuery = `
+      SELECT 
+        propertyId,
+        COUNT(*) as total_rows,
+        COUNT(DISTINCT date) as unique_dates,
+        MIN(date) as first_date,
+        MAX(date) as last_date
+      FROM \`${bq.projectId}.${dataset}.ga4_daily\`
+      WHERE userId = @userId
+      GROUP BY propertyId
+      ORDER BY total_rows DESC
+    `;
+
+    const [stats] = await bq.query({
+      query: statsQuery,
+      params: { userId },
+      location: process.env.BQ_LOCATION || 'US',
+    });
+
+    return res.json({
+      userId,
+      stats,
+      duplicates,
+      hasDuplicates: duplicates.length > 0,
+      duplicateCount: duplicates.length,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'error' });
   }
 });
 
