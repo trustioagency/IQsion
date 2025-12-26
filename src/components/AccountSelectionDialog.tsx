@@ -9,6 +9,7 @@ import {
 } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Input } from "./ui/input";
 import { Loader2, CheckCircle, Database, Clock, Archive } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 
@@ -38,6 +39,8 @@ export function AccountSelectionDialog({
 }: AccountSelectionDialogProps) {
   const { t } = useLanguage();
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [manualAccountId, setManualAccountId] = useState<string>("");
+  const [useManualInput, setUseManualInput] = useState<boolean>(false);
   const [ingestDays, setIngestDays] = useState<string>("30");
   const [retentionDays, setRetentionDays] = useState<string>("90");
 
@@ -45,16 +48,32 @@ export function AccountSelectionDialog({
   useEffect(() => {
     if (open) {
       setSelectedAccountId("");
+      setManualAccountId("");
+      setUseManualInput(false);
       setIngestDays("30");
       setRetentionDays("90");
     }
   }, [open]);
 
+  // Eğer hesap listesi boşsa ve Google Ads ise, otomatik manuel moda geç
+  useEffect(() => {
+    if (open && !isLoadingAccounts && accounts.length === 0 && platformId === 'google_ads') {
+      setUseManualInput(true);
+    }
+  }, [open, isLoadingAccounts, accounts.length, platformId]);
+
   const selectedAccount = accounts.find(a => a.id === selectedAccountId);
 
   const handleConfirm = () => {
-    if (!selectedAccountId || !selectedAccount) return;
-    onConfirm(selectedAccountId, selectedAccount.name, Number(ingestDays), Number(retentionDays));
+    if (useManualInput) {
+      // Manuel giriş modunda
+      if (!manualAccountId.trim()) return;
+      onConfirm(manualAccountId.trim(), manualAccountId.trim(), Number(ingestDays), Number(retentionDays));
+    } else {
+      // Normal seçim modunda
+      if (!selectedAccountId || !selectedAccount) return;
+      onConfirm(selectedAccountId, selectedAccount.name, Number(ingestDays), Number(retentionDays));
+    }
   };
 
   return (
@@ -83,22 +102,73 @@ export function AccountSelectionDialog({
                 Hesaplar yükleniyor...
               </div>
             ) : accounts.length === 0 ? (
-              <div className="text-amber-400 text-sm py-2">
-                Bu platforma bağlı hesap bulunamadı.
+              <div className="space-y-2">
+                <div className="text-amber-400 text-sm py-2">
+                  Bu platforma bağlı hesap bulunamadı.
+                </div>
+                {/* Google Ads için manuel giriş */}
+                {platformId === 'google_ads' && (
+                  <div className="space-y-2">
+                    <Input
+                      type="text"
+                      placeholder="Hesap ID'sini girin (örn: 123-456-7890)"
+                      value={manualAccountId}
+                      onChange={(e) => setManualAccountId(e.target.value)}
+                      className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Google Ads hesap ID'nizi Google Ads arayüzünden bulabilirsiniz.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
-              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
-                  <SelectValue placeholder="Hesap seçin" />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-700 border-slate-600 max-h-64 overflow-auto">
-                  {accounts.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.id}>
-                      {acc.name || acc.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <>
+                <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                  <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                    <SelectValue placeholder="Hesap seçin" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-700 border-slate-600 max-h-64 overflow-auto">
+                    {accounts.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>
+                        {acc.name || acc.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* Google Ads için manuel giriş seçeneği */}
+                {platformId === 'google_ads' && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => setUseManualInput(true)}
+                    className="text-blue-400 hover:text-blue-300 p-0 h-auto text-xs"
+                  >
+                    Manuel olarak hesap ID'si gir
+                  </Button>
+                )}
+              </>
+            )}
+            
+            {/* Manuel giriş modu (listede hesap varsa ama manuel seçilirse) */}
+            {useManualInput && accounts.length > 0 && (
+              <div className="space-y-2 mt-2">
+                <Input
+                  type="text"
+                  placeholder="Hesap ID'sini girin (örn: 123-456-7890)"
+                  value={manualAccountId}
+                  onChange={(e) => setManualAccountId(e.target.value)}
+                  className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
+                />
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => setUseManualInput(false)}
+                  className="text-blue-400 hover:text-blue-300 p-0 h-auto text-xs"
+                >
+                  ← Listeden seç
+                </Button>
+              </div>
             )}
           </div>
 
@@ -159,7 +229,10 @@ export function AccountSelectionDialog({
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={!selectedAccountId || isLoadingAccounts}
+            disabled={
+              isLoadingAccounts || 
+              (useManualInput ? !manualAccountId.trim() : !selectedAccountId)
+            }
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             Hesabı Seç ve Verileri Çek
