@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { db } from "./db";
-import { connections } from "./db";
+import { platformConnections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 // Pipedrive OAuth Configuration
@@ -60,6 +60,7 @@ export async function pipedriveOAuthCallback(req: Request, res: Response) {
     const tokenResponse = await fetch('https://oauth.pipedrive.com/oauth/token', {
       method: 'POST',
       headers: {
+        'Authorization': `Basic ${Buffer.from(`${PIPEDRIVE_CLIENT_ID}:${PIPEDRIVE_CLIENT_SECRET}`).toString('base64')}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
@@ -67,10 +68,6 @@ export async function pipedriveOAuthCallback(req: Request, res: Response) {
         code: code as string,
         redirect_uri: PIPEDRIVE_REDIRECT_URI,
       }).toString(),
-      headers: {
-        'Authorization': `Basic ${Buffer.from(`${PIPEDRIVE_CLIENT_ID}:${PIPEDRIVE_CLIENT_SECRET}`).toString('base64')}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
     });
 
     if (!tokenResponse.ok) {
@@ -98,8 +95,8 @@ export async function pipedriveOAuthCallback(req: Request, res: Response) {
     // Save or update connection
     const existingConnection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')))
       .limit(1);
 
     const connectionData = {
@@ -117,11 +114,11 @@ export async function pipedriveOAuthCallback(req: Request, res: Response) {
 
     if (existingConnection.length > 0) {
       await db
-        .update(connections)
+        .update(platformConnections)
         .set(connectionData)
-        .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')));
+        .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')));
     } else {
-      await db.insert(connections).values(connectionData);
+      await db.insert(platformConnections).values(connectionData);
     }
 
     // Redirect back to settings page
@@ -144,8 +141,8 @@ export async function getPipedriveDeals(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -187,8 +184,8 @@ export async function getPipedrivePersons(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -230,8 +227,8 @@ export async function getPipedriveOrganizations(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -273,8 +270,8 @@ export async function testPipedriveConnection(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -321,13 +318,13 @@ export async function disconnectPipedrive(req: Request, res: Response) {
     }
 
     await db
-      .update(connections)
+      .update(platformConnections)
       .set({
         isConnected: false,
         accessToken: null,
         refreshToken: null,
       })
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'pipedrive')));
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'pipedrive')));
 
     res.json({ success: true, message: 'Pipedrive disconnected' });
   } catch (error) {

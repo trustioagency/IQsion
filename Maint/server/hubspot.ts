@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { connections } from "./db";
+import { platformConnections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 // HubSpot OAuth Configuration
@@ -111,8 +111,8 @@ export async function hubspotOAuthCallback(req: Request, res: Response) {
     // Save or update connection
     const existingConnection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')))
       .limit(1);
 
     const connectionData = {
@@ -129,11 +129,11 @@ export async function hubspotOAuthCallback(req: Request, res: Response) {
 
     if (existingConnection.length > 0) {
       await db
-        .update(connections)
+        .update(platformConnections)
         .set(connectionData)
-        .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')));
+        .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')));
     } else {
-      await db.insert(connections).values(connectionData);
+      await db.insert(platformConnections).values(connectionData);
     }
 
     // Redirect back to settings page
@@ -156,8 +156,8 @@ export async function getHubSpotContacts(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -202,8 +202,8 @@ export async function getHubSpotDeals(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -248,8 +248,8 @@ export async function getHubSpotCompanies(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -294,8 +294,8 @@ export async function testHubSpotConnection(req: Request, res: Response) {
 
     const connection = await db
       .select()
-      .from(connections)
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')))
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')))
       .limit(1);
 
     if (!connection.length || !connection[0].accessToken) {
@@ -348,13 +348,13 @@ export async function disconnectHubSpot(req: Request, res: Response) {
     }
 
     await db
-      .update(connections)
+      .update(platformConnections)
       .set({
         isConnected: false,
         accessToken: null,
         refreshToken: null,
       })
-      .where(and(eq(connections.userId, userId), eq(connections.platform, 'hubspot')));
+      .where(and(eq(platformConnections.userId, userId), eq(platformConnections.platform, 'hubspot')));
 
     res.json({ success: true, message: 'HubSpot disconnected' });
   } catch (error) {
