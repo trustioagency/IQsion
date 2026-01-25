@@ -7,6 +7,7 @@ import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
 import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, applyRetentionForUserAndSource, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
 import * as hubspot from "./hubspot";
+import * as pipedrive from "./pipedrive";
 // Basit fetch timeout helper
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -4667,6 +4668,31 @@ router.get('/api/hubspot/summary', hubspot.testHubSpotConnection);
 
 // Disconnect HubSpot
 router.post('/api/hubspot/disconnect', hubspot.disconnectHubSpot);
+
+/* ===================== PIPEDRIVE CRM INTEGRATION (OAuth + API) ===================== */
+// Env vars: PIPEDRIVE_CLIENT_ID, PIPEDRIVE_CLIENT_SECRET, PIPEDRIVE_REDIRECT_URI
+// Stored under connections table with platform='pipedrive'
+
+// Initiate Pipedrive OAuth
+router.get('/api/auth/pipedrive/connect', pipedrive.pipedriveAuthRedirect);
+
+// Pipedrive OAuth callback
+router.get('/api/auth/pipedrive/callback', pipedrive.pipedriveOAuthCallback);
+
+// Get Pipedrive deals
+router.get('/api/pipedrive/deals', pipedrive.getPipedriveDeals);
+
+// Get Pipedrive persons (contacts)
+router.get('/api/pipedrive/persons', pipedrive.getPipedrivePersons);
+
+// Get Pipedrive organizations (companies)
+router.get('/api/pipedrive/organizations', pipedrive.getPipedriveOrganizations);
+
+// Test Pipedrive connection
+router.get('/api/pipedrive/summary', pipedrive.testPipedriveConnection);
+
+// Disconnect Pipedrive
+router.post('/api/pipedrive/disconnect', pipedrive.disconnectPipedrive);
 
 // Google Analytics property listesi endpointi
 router.get('/api/analytics/properties', async (req, res) => {
