@@ -11,6 +11,7 @@ import { Label } from "../components/ui/label";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
 const AIChatPanel = lazy(() => import("../components/ai-chat-panel"));
+import InsightsWidget from "../components/insights-widget";
 import Header from "../components/layout/header";
 import StartGuide from "../components/start-guide";
 import { useLanguage } from "../contexts/LanguageContext";
@@ -692,45 +693,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* AI + Actions Row */}
+      {/* AI Insights + AI Chat Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <InsightsWidget />
         <div>
           <Suspense fallback={null}>
             <AIChatPanel pageContext="dashboard" title="IQsion AI" variant="minimal" />
           </Suspense>
         </div>
-        <Card className="bg-slate-800/60 border-slate-700/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <Target className="w-5 h-5" />
-              {t('actionableItems')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {actionableItems.map((action, index) => (
-                <div key={index} className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg hover:bg-blue-500/15 transition-colors">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h5 className="font-medium text-white mb-1">{action.title}</h5>
-                      <p className="text-slate-300 text-sm">{action.description}</p>
-                    </div>
-                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 ml-3">
-                      {action.estimatedReturn}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">{t('impact')}: {action.impact}</span>
-                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
-                      <Play className="w-3 h-3 mr-1" />
-                      {t('apply')}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Enhanced Controls Section */}

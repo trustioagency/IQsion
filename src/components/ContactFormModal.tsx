@@ -5,6 +5,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Loader2, CheckCircle2 } from "lucide-react";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface ContactFormModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface ContactFormModalProps {
 }
 
 export default function ContactFormModal({ open, onOpenChange, type = 'contact' }: ContactFormModalProps) {
+  const { t } = useLanguage();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [formData, setFormData] = useState({
@@ -53,30 +55,30 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
       <DialogContent className="sm:max-w-[500px] bg-gray-900 border-gray-800 text-white">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-800 to-blue-950 bg-clip-text text-transparent">
-            {type === 'demo' ? 'Demo Talep Edin' : 'Bize Ulaşın'}
+            {type === 'demo' ? t('contactFormDemoTitle') : t('contactFormContactTitle')}
           </DialogTitle>
           <DialogDescription className="text-gray-400">
             {type === 'demo' 
-              ? 'Size özel bir demo sunumu için bilgilerinizi bırakın. En kısa sürede size ulaşalım.'
-              : 'Sorularınız mı var? Size yardımcı olmaktan mutluluk duyarız.'}
+              ? t('contactFormDemoDesc')
+              : t('contactFormContactDesc')}
           </DialogDescription>
         </DialogHeader>
 
         {isSuccess ? (
           <div className="py-12 text-center">
             <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">Başarıyla Gönderildi!</h3>
-            <p className="text-gray-400">En kısa sürede size geri dönüş yapacağız.</p>
+            <h3 className="text-xl font-semibold text-white mb-2">{t('contactFormSuccessTitle')}</h3>
+            <p className="text-gray-400">{t('contactFormSuccessDesc')}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="name" className="text-gray-300">Adınız *</Label>
+                <Label htmlFor="name" className="text-gray-300">{t('contactFormName')} *</Label>
                 <Input
                   id="name"
                   name="name"
-                  placeholder="Adınız Soyadınız"
+                  placeholder={t('contactFormNamePlaceholder')}
                   value={formData.name}
                   onChange={handleChange}
                   required
@@ -84,12 +86,12 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-gray-300">E-posta *</Label>
+                <Label htmlFor="email" className="text-gray-300">{t('contactFormEmail')} *</Label>
                 <Input
                   id="email"
                   name="email"
                   type="email"
-                  placeholder="ornek@sirket.com"
+                  placeholder={t('contactFormEmailPlaceholder')}
                   value={formData.email}
                   onChange={handleChange}
                   required
@@ -100,23 +102,23 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="company" className="text-gray-300">Şirket</Label>
+                <Label htmlFor="company" className="text-gray-300">{t('contactFormCompany')}</Label>
                 <Input
                   id="company"
                   name="company"
-                  placeholder="Şirket Adı"
+                  placeholder={t('contactFormCompanyPlaceholder')}
                   value={formData.company}
                   onChange={handleChange}
                   className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="phone" className="text-gray-300">Telefon</Label>
+                <Label htmlFor="phone" className="text-gray-300">{t('contactFormPhone')}</Label>
                 <Input
                   id="phone"
                   name="phone"
                   type="tel"
-                  placeholder="+90 5xx xxx xx xx"
+                  placeholder={t('contactFormPhonePlaceholder')}
                   value={formData.phone}
                   onChange={handleChange}
                   className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus:border-blue-500"
@@ -126,14 +128,14 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
 
             <div className="space-y-2">
               <Label htmlFor="message" className="text-gray-300">
-                {type === 'demo' ? 'Demo için özel notlar' : 'Mesajınız *'}
+                {type === 'demo' ? t('contactFormMessageDemo') : t('contactFormMessageContact') + ' *'}
               </Label>
               <Textarea
                 id="message"
                 name="message"
                 placeholder={type === 'demo' 
-                  ? 'Hangi konularda demo görmek istersiniz?'
-                  : 'Mesajınızı buraya yazın...'}
+                  ? t('contactFormMessageDemoPlaceholder')
+                  : t('contactFormMessageContactPlaceholder')}
                 value={formData.message}
                 onChange={handleChange}
                 required={type === 'contact'}
@@ -149,7 +151,7 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
                 onClick={() => onOpenChange(false)}
                 className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
               >
-                İptal
+                {t('contactFormCancel')}
               </Button>
               <Button
                 type="submit"
@@ -159,10 +161,10 @@ export default function ContactFormModal({ open, onOpenChange, type = 'contact' 
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Gönderiliyor...
+                    {t('contactFormSending')}
                   </>
                 ) : (
-                  'Gönder'
+                  t('contactFormSend')
                 )}
               </Button>
             </div>

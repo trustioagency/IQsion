@@ -16,6 +16,7 @@ import {
 import AIChatPanel from "../components/ai-chat-panel";
 import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from "../hooks/useAuth";
+import { useLanguage } from "../contexts/LanguageContext";
 
 type ProfitabilitySummary = {
   requestedRange: { startDate: string; endDate: string };
@@ -33,6 +34,7 @@ export default function Profitability() {
   const [comparisonPeriod, setComparisonPeriod] = useState('previous');
 
   const { user } = useAuth();
+  const { t } = useLanguage();
   const uid = (user as any)?.uid || (user as any)?.id;
 
   const makeRange = (key: string) => {
@@ -62,18 +64,18 @@ export default function Profitability() {
     }
   });
 
-  const fmtTRY = (n: number) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n || 0);
+  const fmtUSD = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
   const totals = profitData?.totals;
   const profitabilityMetrics = useMemo(() => {
-    const revenue = totals ? fmtTRY(totals.revenue) : '₺0';
-    const gross = totals ? fmtTRY(totals.grossProfit) : '₺0';
-    const net = totals ? fmtTRY(totals.netProfit) : '₺0';
+    const revenue = totals ? fmtUSD(totals.revenue) : '$0';
+    const gross = totals ? fmtUSD(totals.grossProfit) : '$0';
+    const net = totals ? fmtUSD(totals.netProfit) : '$0';
     const roasStr = totals ? (totals.roas === null ? '—' : `${(totals.roas || 0).toFixed(1)}x`) : '—';
     return [
-      { title: 'Gelir', value: revenue, color: 'purple' },
-      { title: 'Brüt Kar', value: gross, color: 'blue' },
-      { title: 'Net Kar (Cebine Kalan)', value: net, color: 'green' },
-      { title: 'ROAS', value: roasStr, color: 'orange' }
+      { title: t('revenue'), value: revenue, color: 'purple' },
+      { title: t('grossProfit'), value: gross, color: 'blue' },
+      { title: t('netProfitPocket'), value: net, color: 'green' },
+      { title: t('roas'), value: roasStr, color: 'orange' }
     ];
   }, [totals]);
 
@@ -83,12 +85,12 @@ export default function Profitability() {
   }, [profitData]);
 
   const channelOptions = [
-    { value: 'all', label: 'Tüm Kanallar' },
+    { value: 'all', label: t('allChannels') },
     { value: 'google', label: 'Google Ads' },
     { value: 'meta', label: 'Meta Ads' },
     { value: 'tiktok', label: 'TikTok Ads' },
-    { value: 'email', label: 'Email Marketing' },
-    { value: 'organic', label: 'Organik Trafik' }
+    { value: 'email', label: t('emailMarketing') },
+    { value: 'organic', label: 'Organic Traffic' }
   ];
 
   const channelProfitability = [
@@ -191,8 +193,8 @@ export default function Profitability() {
             {/* Header with Advanced Filters */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <h1 className="text-2xl font-bold text-white mb-2">Karlılık Analizi</h1>
-                <p className="text-slate-400">Kanal, ürün ve hedef kitle bazında derinlemesine karlılık analizi</p>
+                <h1 className="text-2xl font-bold text-white mb-2">{t('profitabilityAnalysis')}</h1>
+                <p className="text-slate-400">{t('channelProductAudienceAnalysis')}</p>
               </div>
               
               <div className="flex flex-wrap items-center gap-3">
@@ -214,9 +216,9 @@ export default function Profitability() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-slate-800 border-slate-600">
-                    <SelectItem value="7d">Son 7 gün</SelectItem>
-                    <SelectItem value="30d">Son 30 gün</SelectItem>
-                    <SelectItem value="90d">Son 90 gün</SelectItem>
+                    <SelectItem value="7d">{t('last7Days')}</SelectItem>
+                    <SelectItem value="30d">{t('last30Days')}</SelectItem>
+                    <SelectItem value="90d">{t('last90Days')}</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -226,7 +228,7 @@ export default function Profitability() {
                     checked={showComparison}
                     onCheckedChange={setShowComparison}
                   />
-                  <Label htmlFor="comparison" className="text-sm text-slate-300">Karşılaştır</Label>
+                  <Label htmlFor="comparison" className="text-sm text-slate-300">{t('compare')}</Label>
                 </div>
               </div>
             </div>
@@ -260,7 +262,7 @@ export default function Profitability() {
               <CardHeader>
                 <CardTitle className="text-white flex items-center gap-2">
                   <LineChart className="w-5 h-5" />
-                  Karlılık Trendi
+                  {t('profitTrend')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -283,21 +285,21 @@ export default function Profitability() {
                         dataKey="netProfit" 
                         stroke="#10B981" 
                         strokeWidth={3}
-                        name="Net Kar"
+                        name={t('netProfit')}
                       />
                       <Line 
                         type="monotone" 
                         dataKey="grossProfit" 
                         stroke="#3B82F6" 
                         strokeWidth={2}
-                        name="Brüt Kar"
+                        name={t('grossProfit')}
                       />
                       <Line 
                         type="monotone" 
                         dataKey="revenue" 
                         stroke="#8B5CF6" 
                         strokeWidth={2}
-                        name="Gelir"
+                        name={t('revenue')}
                       />
                     </RechartsLineChart>
                   </ResponsiveContainer>
@@ -311,7 +313,7 @@ export default function Profitability() {
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
                     <BarChart3 className="w-5 h-5" />
-                    Kanal Karlılığı
+                    {t('channelProfitability')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -319,20 +321,20 @@ export default function Profitability() {
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-slate-700">
-                          <th className="text-left py-3 px-4 text-slate-300">Kanal</th>
-                          <th className="text-right py-3 px-4 text-slate-300">Gelir</th>
-                          <th className="text-right py-3 px-4 text-slate-300">Kar</th>
-                          <th className="text-right py-3 px-4 text-slate-300">LTV</th>
-                          <th className="text-right py-3 px-4 text-slate-300">ROAS</th>
+                          <th className="text-left py-3 px-4 text-slate-300">{t('channel')}</th>
+                          <th className="text-right py-3 px-4 text-slate-300">{t('revenue')}</th>
+                          <th className="text-right py-3 px-4 text-slate-300">{t('profit')}</th>
+                          <th className="text-right py-3 px-4 text-slate-300">{t('ltv')}</th>
+                          <th className="text-right py-3 px-4 text-slate-300">{t('roas')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {channelProfitability.map((channel, index) => (
                           <tr key={index} className="border-b border-slate-700/50">
                             <td className="py-3 px-4 text-white font-medium">{channel.channel}</td>
-                            <td className="text-right py-3 px-4 text-white">₺{channel.revenue.toLocaleString()}</td>
-                            <td className="text-right py-3 px-4 text-green-400 font-medium">₺{channel.profit.toLocaleString()}</td>
-                            <td className="text-right py-3 px-4 text-blue-400">₺{channel.ltv}</td>
+                            <td className="text-right py-3 px-4 text-white">${channel.revenue.toLocaleString()}</td>
+                            <td className="text-right py-3 px-4 text-green-400 font-medium">${channel.profit.toLocaleString()}</td>
+                            <td className="text-right py-3 px-4 text-blue-400">${channel.ltv}</td>
                             <td className="text-right py-3 px-4 text-purple-400 font-medium">
                               {channel.roas === Infinity ? '∞' : `${channel.roas.toFixed(1)}x`}
                             </td>
@@ -348,7 +350,7 @@ export default function Profitability() {
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
                     <Target className="w-5 h-5" />
-                    Kar Dağılımı
+                    {t('profitDistribution')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -402,11 +404,11 @@ export default function Profitability() {
               <TabsList className="grid w-full grid-cols-2 bg-slate-800">
                 <TabsTrigger value="products" className="data-[state=active]:bg-slate-700">
                   <Package className="w-4 h-4 mr-2" />
-                  Ürün Analizi
+                  {t('productAnalysis')}
                 </TabsTrigger>
                 <TabsTrigger value="audience" className="data-[state=active]:bg-slate-700">
                   <Users className="w-4 h-4 mr-2" />
-                  Hedef Kitle Analizi
+                  {t('audienceAnalysis')}
                 </TabsTrigger>
               </TabsList>
 
@@ -416,7 +418,7 @@ export default function Profitability() {
                     <div className="flex justify-between items-center">
                       <CardTitle className="text-white flex items-center gap-2">
                         <Package className="w-5 h-5" />
-                        Ürün Karlılığı Detayı
+                        {t('detailedProductProfitability')}
                       </CardTitle>
                       <div className="flex items-center gap-2">
                         <Select value={sortBy} onValueChange={setSortBy}>
@@ -425,11 +427,11 @@ export default function Profitability() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-slate-800 border-slate-600">
-                            <SelectItem value="profit">Kar</SelectItem>
-                            <SelectItem value="margin">Marj</SelectItem>
-                            <SelectItem value="revenue">Gelir</SelectItem>
-                            <SelectItem value="ltv">LTV</SelectItem>
-                            <SelectItem value="roas">ROAS</SelectItem>
+                            <SelectItem value="profit">{t('profit')}</SelectItem>
+                            <SelectItem value="margin">{t('margin')}</SelectItem>
+                            <SelectItem value="revenue">{t('revenue')}</SelectItem>
+                            <SelectItem value="ltv">{t('ltv')}</SelectItem>
+                            <SelectItem value="roas">{t('roas')}</SelectItem>
                           </SelectContent>
                         </Select>
                         <Button
@@ -461,15 +463,15 @@ export default function Profitability() {
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                             <div className="space-y-1">
                               <span className="text-slate-400">Gelir</span>
-                              <div className="text-white font-medium">₺{product.revenue.toLocaleString()}</div>
+                              <div className="text-white font-medium">${product.revenue.toLocaleString()}</div>
                             </div>
                             <div className="space-y-1">
-                              <span className="text-slate-400">Net Kar</span>
-                              <div className="text-green-400 font-medium">₺{product.profit.toLocaleString()}</div>
+                              <span className="text-slate-400">{t('netProfit')}</span>
+                              <div className="text-green-400 font-medium">${product.profit.toLocaleString()}</div>
                             </div>
                             <div className="space-y-1">
-                              <span className="text-slate-400">LTV</span>
-                              <div className="text-blue-400 font-medium">₺{product.ltv}</div>
+                              <span className="text-slate-400">{t('ltv')}</span>
+                              <div className="text-blue-400 font-medium">${product.ltv}</div>
                             </div>
                             <div className="space-y-1">
                               <span className="text-slate-400">Satılan Birim</span>
@@ -489,7 +491,7 @@ export default function Profitability() {
                     <div className="flex justify-between items-center">
                       <CardTitle className="text-white flex items-center gap-2">
                         <Users className="w-5 h-5" />
-                        Derinlemesine Hedef Kitle Analizi
+                        {t('deepAudienceAnalysis')}
                       </CardTitle>
                       <div className="flex items-center gap-2">
                         <Select value={sortBy} onValueChange={setSortBy}>
@@ -498,10 +500,10 @@ export default function Profitability() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-slate-800 border-slate-600">
-                            <SelectItem value="profit">Kar</SelectItem>
-                            <SelectItem value="ltv">LTV</SelectItem>
-                            <SelectItem value="repeatRate">Tekrar Oranı</SelectItem>
-                            <SelectItem value="avgOrderValue">Ort. Sepet</SelectItem>
+                            <SelectItem value="profit">{t('profit')}</SelectItem>
+                            <SelectItem value="ltv">{t('ltv')}</SelectItem>
+                            <SelectItem value="repeatRate">{t('repeatRate')}</SelectItem>
+                            <SelectItem value="avgOrderValue">{t('avgOrderValue')}</SelectItem>
                           </SelectContent>
                         </Select>
                         <Button
@@ -549,20 +551,20 @@ export default function Profitability() {
                           
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                             <div className="space-y-1">
-                              <span className="text-slate-400">Net Kar</span>
-                              <div className="text-green-400 font-medium">₺{audience.profit.toLocaleString()}</div>
+                              <span className="text-slate-400">{t('netProfit')}</span>
+                              <div className="text-green-400 font-medium">${audience.profit.toLocaleString()}</div>
                             </div>
                             <div className="space-y-1">
-                              <span className="text-slate-400">LTV</span>
-                              <div className="text-blue-400 font-medium">₺{audience.ltv}</div>
+                              <span className="text-slate-400">{t('ltv')}</span>
+                              <div className="text-blue-400 font-medium">${audience.ltv}</div>
                             </div>
                             <div className="space-y-1">
-                              <span className="text-slate-400">CAC</span>
-                              <div className="text-orange-400 font-medium">₺{audience.cac}</div>
+                              <span className="text-slate-400">{t('cac')}</span>
+                              <div className="text-orange-400 font-medium">${audience.cac}</div>
                             </div>
                             <div className="space-y-1">
-                              <span className="text-slate-400">Ort. Sepet</span>
-                              <div className="text-white font-medium">₺{audience.avgOrderValue}</div>
+                              <span className="text-slate-400">{t('avgOrderValue')}</span>
+                              <div className="text-white font-medium">${audience.avgOrderValue}</div>
                             </div>
                           </div>
 
@@ -571,7 +573,7 @@ export default function Profitability() {
                               <div>
                                 <h5 className="text-slate-300 font-medium mb-2 flex items-center gap-1">
                                   <Heart className="w-4 h-4" />
-                                  İlgi Alanları
+                                  {t('interests')}
                                 </h5>
                                 <div className="flex flex-wrap gap-1">
                                   {audience.interests.map((interest, i) => (
@@ -584,7 +586,7 @@ export default function Profitability() {
                               <div className="md:col-span-2">
                                 <h5 className="text-slate-300 font-medium mb-2 flex items-center gap-1">
                                   <Eye className="w-4 h-4" />
-                                  Davranış Kalıpları
+                                  {t('behaviorPatterns')}
                                 </h5>
                                 <div className="space-y-1">
                                   {audience.behaviors.map((behavior, i) => (
@@ -604,7 +606,7 @@ export default function Profitability() {
 
             {/* AI Chat Panel */}
             <AIChatPanel 
-              pageContext="Karlılık Analizi"
+              pageContext={t('profitabilityAnalysis')}
               insights={[
                 {
                   id: '1',

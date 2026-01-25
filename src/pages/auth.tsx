@@ -7,6 +7,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useLanguage } from "../contexts/LanguageContext";
 
 type InputChangeEvent = {
   target: {
@@ -20,6 +21,7 @@ type FormSubmitEvent = {
 };
 
 export default function Auth() {
+  const { t } = useLanguage();
   const [, setLocation] = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -122,41 +124,42 @@ export default function Auth() {
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-800/10 rounded-full blur-3xl"></div>
       
       <div className="w-full max-w-md relative z-10">
+        
         {/* Logo & Brand */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
+          <a href="/" className="flex items-center justify-center gap-3 mb-4 group cursor-pointer">
             <img 
               src="/iqsion.logo.png" 
               alt="IQsion" 
-              className="w-16 h-16 object-contain mix-blend-lighten drop-shadow-2xl"
+              className="w-16 h-16 object-contain mix-blend-lighten drop-shadow-2xl group-hover:scale-110 transition-transform"
             />
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-blue-600 bg-clip-text text-transparent group-hover:from-blue-300 group-hover:via-blue-400 group-hover:to-blue-500 transition-all">
               IQsion
             </h1>
-          </div>
-          <p className="text-gray-400 text-sm">AI-Powered Marketing Intelligence Platform</p>
+          </a>
+          <p className="text-gray-400 text-sm">{t('authSubtitle')}</p>
         </div>
 
         <Card className="bg-gray-900/50 border-gray-800 backdrop-blur-xl shadow-2xl shadow-blue-900/20">
           <CardHeader className="border-b border-gray-800/50">
-            <CardTitle className="text-center text-white text-lg">Hesabınıza Erişin</CardTitle>
+            <CardTitle className="text-center text-white text-lg">{t('authTitle')}</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
             <Tabs defaultValue="login" className="w-full">
               <TabsList className="grid w-full grid-cols-2 bg-gray-800/50 p-1">
-                <TabsTrigger value="login" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">Giriş Yap</TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">Hesap Oluştur</TabsTrigger>
+                <TabsTrigger value="login" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">{t('authLoginTab')}</TabsTrigger>
+                <TabsTrigger value="signup" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-800 data-[state=active]:to-blue-950 data-[state=active]:text-white text-gray-400 data-[state=active]:shadow-lg">{t('authSignupTab')}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="text-gray-300">E-posta</Label>
+                    <Label htmlFor="email" className="text-gray-300">{t('authEmail')}</Label>
                     <Input
                       id="email"
                       name="email"
                       type="email"
-                      placeholder="ornek@sirket.com"
+                      placeholder={t('authEmailPlaceholder')}
                       value={formData.email}
                       onChange={handleInputChange}
                       required
@@ -165,13 +168,13 @@ export default function Auth() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="password" className="text-gray-300">Şifre</Label>
+                    <Label htmlFor="password" className="text-gray-300">{t('authPassword')}</Label>
                     <div className="relative">
                       <Input
                         id="password"
                         name="password"
                         type={showPassword ? "text" : "password"}
-                        placeholder="••••••••"
+                        placeholder={t('authPasswordPlaceholder')}
                         value={formData.password}
                         onChange={handleInputChange}
                         required
@@ -197,10 +200,10 @@ export default function Auth() {
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Giriş yapılıyor...
+                        {t('authLoggingIn')}
                       </>
                     ) : (
-                      'Giriş Yap'
+                      t('authLoginButton')
                     )}
                   </Button>
                 </form>
@@ -210,11 +213,11 @@ export default function Auth() {
                 <form onSubmit={handleSignup} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="firstName" className="text-gray-300">Ad</Label>
+                      <Label htmlFor="firstName" className="text-gray-300">{t('authFirstName')}</Label>
                       <Input
                         id="firstName"
                         name="firstName"
-                        placeholder="Adınız"
+                        placeholder={t('authFirstName')}
                         value={formData.firstName}
                         onChange={handleInputChange}
                         required
@@ -222,11 +225,11 @@ export default function Auth() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="lastName" className="text-gray-300">Soyad</Label>
+                      <Label htmlFor="lastName" className="text-gray-300">{t('authLastName')}</Label>
                       <Input
                         id="lastName"
                         name="lastName"
-                        placeholder="Soyadınız"
+                        placeholder={t('authLastName')}
                         value={formData.lastName}
                         onChange={handleInputChange}
                         required
@@ -236,11 +239,11 @@ export default function Auth() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="companyName" className="text-gray-300">Şirket Adı</Label>
+                    <Label htmlFor="companyName" className="text-gray-300">{t('authCompanyName')}</Label>
                     <Input
                       id="companyName"
                       name="companyName"
-                      placeholder="Şirket Adı"
+                      placeholder={t('authCompanyName')}
                       value={formData.companyName}
                       onChange={handleInputChange}
                       required
@@ -249,12 +252,12 @@ export default function Auth() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="signupEmail" className="text-gray-300">E-posta</Label>
+                    <Label htmlFor="signupEmail" className="text-gray-300">{t('authEmail')}</Label>
                     <Input
                       id="signupEmail"
                       name="email"
                       type="email"
-                      placeholder="ornek@sirket.com"
+                      placeholder={t('authEmailPlaceholder')}
                       value={formData.email}
                       onChange={handleInputChange}
                       required
@@ -263,12 +266,12 @@ export default function Auth() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="signupPassword" className="text-gray-300">Şifre</Label>
+                    <Label htmlFor="signupPassword" className="text-gray-300">{t('authPassword')}</Label>
                     <Input
                       id="signupPassword"
                       name="password"
                       type="password"
-                      placeholder="••••••••"
+                      placeholder={t('authPasswordPlaceholder')}
                       value={formData.password}
                       onChange={handleInputChange}
                       required
@@ -277,12 +280,12 @@ export default function Auth() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="confirmPassword" className="text-gray-300">Şifre Tekrar</Label>
+                    <Label htmlFor="confirmPassword" className="text-gray-300">{t('authConfirmPassword')}</Label>
                     <Input
                       id="confirmPassword"
                       name="confirmPassword"
                       type="password"
-                      placeholder="••••••••"
+                      placeholder={t('authPasswordPlaceholder')}
                       value={formData.confirmPassword}
                       onChange={handleInputChange}
                       required
@@ -294,10 +297,10 @@ export default function Auth() {
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Hesap oluşturuluyor...
+                        {t('authCreatingAccount')}
                       </>
                     ) : (
-                      'Hesap Oluştur'
+                      t('authSignupButton')
                     )}
                   </Button>
                 </form>

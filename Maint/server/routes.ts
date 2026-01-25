@@ -272,19 +272,19 @@ router.post('/api/ai/chat', async (req, res) => {
     };
 
     // Try flash first, then pro as a fallback if empty/blocked
-    const primary = await callModel('gemini-1.5-flash-001');
+    const primary = await callModel('gemini-2.0-flash-001');
     if (primary.ok && primary.text) {
       if (isDebug) {
-        const dbg = { model: 'gemini-1.5-flash', finishReason: (primary as any)?.raw?.candidates?.[0]?.finishReason || null };
+        const dbg = { model: 'gemini-2.0-flash', finishReason: (primary as any)?.raw?.candidates?.[0]?.finishReason || null };
         return res.json({ response: primary.text, _debug: dbg });
       }
       return res.json({ response: primary.text });
     }
     // If blocked or empty, try a more capable model
-  const secondary = await callModel('gemini-1.5-pro-001');
+  const secondary = await callModel('gemini-2.5-pro');
     if (secondary.ok && secondary.text) {
       if (isDebug) {
-        const dbg = { model: 'gemini-1.5-pro', finishReason: (secondary as any)?.raw?.candidates?.[0]?.finishReason || null };
+        const dbg = { model: 'gemini-2.5-pro', finishReason: (secondary as any)?.raw?.candidates?.[0]?.finishReason || null };
         return res.json({ response: secondary.text, _debug: dbg });
       }
       return res.json({ response: secondary.text });
@@ -6098,6 +6098,469 @@ router.get('/api/debug/ga4-duplicates', async (req, res) => {
       duplicateCount: duplicates.length,
     });
   } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// ===== AI INSIGHTS: Anomaly Detection & Recommendations =====
+
+import { InsightsService, ANOMALY_CONFIG } from './services/insightsService';
+
+// Helper: Detect anomalies from BigQuery data
+async function detectAnomalies(userId: string): Promise<any[]> {
+  const bq = getBigQuery();
+  const insightsService = new InsightsService(bq);
+  return await insightsService.detectAnomalies(userId);
+}
+
+// Endpoint: Get insights configuration
+router.get('/api/insights/config', async (req, res) => {
+  try {
+    const config = Object.entries(ANOMALY_CONFIG).map(([type, settings]) => ({
+      type,
+      ...settings,
+      description: InsightsService.getConfigDescription(type as any),
+    }));
+
+    return res.json({ config });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// Endpoint: Detect anomalies (test endpoint)
+router.post('/api/insights/detect-anomalies', async (req, res) => {
+  // Temporarily disabled for testing
+  // if (!requireAdmin(req, res)) return;
+  
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    const anomalies = await detectAnomalies(userId);
+
+    return res.json({
+      userId,
+      anomaliesFound: anomalies.length,
+      anomalies,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// Helper: Analyze anomalies with AI (minimal tokens)
+async function analyzeAnomaliesWithAI(anomalies: any[]): Promise<any[]> {
+  const apiKey = process.env.GEMINI_API_KEY || '';
+  if (!apiKey || anomalies.length === 0) return [];
+
+  const insights: any[] = [];
+
+  // Process max 5 anomalies to save cost
+  const topAnomalies = anomalies.slice(0, 5);
+
+  for (const anomaly of topAnomalies) {
+    try {
+      // Kategorileri belirle
+      const getCategory = (type: string) => {
+        if (['cost_spike', 'cpc_spike'].includes(type)) return 'anomali';
+        if (['ctr_drop', 'cvr_drop', 'impression_drop'].includes(type)) return 'anomali';
+        if (['low_roas', 'zero_conversions'].includes(type)) return 'optimizasyon';
+        return 'içgörü';
+      };
+
+      // Create concise prompt (minimal tokens)
+      let prompt = '';
+      
+      if (anomaly.type === 'cost_spike') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: Harcama %${anomaly.changePct} arttı (Önceki: $${anomaly.previousCost}, Şimdi: $${anomaly.currentCost})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else if (anomaly.type === 'ctr_drop') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: CTR %${Math.abs(anomaly.changePct)} düştü (Önceki: %${anomaly.previousCtr.toFixed(2)}, Şimdi: %${anomaly.currentCtr.toFixed(2)})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else if (anomaly.type === 'low_roas') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: Düşük ROAS (${anomaly.roas}x, Harcama: $${anomaly.cost}, Gelir: $${anomaly.revenue})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else if (anomaly.type === 'zero_conversions') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: Harcama var ama satış yok (Harcama: $${anomaly.cost}, Tıklama: ${anomaly.clicks})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else if (anomaly.type === 'cpc_spike') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: CPC %${anomaly.changePct} arttı (Önceki: $${anomaly.previousCpc.toFixed(2)}, Şimdi: $${anomaly.currentCpc.toFixed(2)})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else if (anomaly.type === 'impression_drop') {
+        prompt = `E-ticaret reklam analizi:
+Platform: ${anomaly.source}
+Durum: Gösterim %${Math.abs(anomaly.changePct)} düştü (Önceki: ${anomaly.previousImpressions.toLocaleString()}, Şimdi: ${anomaly.currentImpressions.toLocaleString()})
+
+Kısa ve net yanıt ver:
+- Başlık: (max 8 kelime, yalın dil)
+- Aksiyon: (tek cümle, ne yapmalı)`;
+      } else {
+        continue; // Skip unknown types
+      }
+
+      // Call Gemini with minimal config (flash model = cheapest)
+      const body = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.4,
+          topP: 0.8,
+          maxOutputTokens: 200, // Keep it short
+        },
+      };
+
+      const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash-001:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const r = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }, 10000);
+
+      const j = await r.json() as any;
+      if (!r.ok) {
+        console.error('[AI INSIGHTS] Gemini error:', r.status, j);
+        continue;
+      }
+
+      const candidate = j?.candidates?.[0];
+      const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+      const aiText = parts.map((p: any) => p?.text || '').join('\n').trim();
+
+      console.log('[AI INSIGHTS] Gemini raw response:', aiText);
+
+      if (!aiText) {
+        console.log('[AI INSIGHTS] No text in Gemini response');
+        continue;
+      }
+
+      // Parse AI response (expecting "Başlık: ...\nAksiyon: ...")
+      const lines = aiText.split('\n').filter((l: string) => l.trim());
+      let title = 'Dikkat Gerekli';
+      let action = 'Kampanyaları gözden geçir';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        // Remove ** markdown formatting
+        const cleaned = trimmed.replace(/\*\*/g, '');
+        
+        if (cleaned.match(/^-?\s*başlık:/i)) {
+          title = cleaned.replace(/^-?\s*başlık:\s*/i, '').trim();
+        } else if (cleaned.match(/^-?\s*aksiyon:/i)) {
+          action = cleaned.replace(/^-?\s*aksiyon:\s*/i, '').trim();
+        }
+      }
+
+      console.log('[AI INSIGHTS] Parsed - title:', title, ', action:', action);
+
+      // Get category based on anomaly type
+      const category = getCategory(anomaly.type);
+
+      insights.push({
+        id: `ins_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: anomaly.type,
+        category,
+        priority: anomaly.priority,
+        title,
+        action,
+        source: anomaly.source,
+        data: anomaly,
+        generatedAt: Date.now(),
+      });
+
+    } catch (err) {
+      console.error('[AI INSIGHTS] Error processing anomaly:', err);
+      continue;
+    }
+  }
+
+  return insights;
+}
+
+// Endpoint: Generate insights with AI
+router.post('/api/insights/generate', async (req, res) => {
+  // Temporarily disabled for testing
+  // if (!requireAdmin(req, res)) return;
+  
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    // 1. Detect anomalies
+    const anomalies = await detectAnomalies(userId);
+
+    if (anomalies.length === 0) {
+      return res.json({
+        userId,
+        anomaliesDetected: 0,
+        insights: [],
+        message: 'No anomalies detected - all metrics look good!',
+      });
+    }
+
+    // 2. Analyze with AI (only top 5 to save cost)
+    const insights = await analyzeAnomaliesWithAI(anomalies);
+
+    // 3. Save to Firebase
+    if (insights.length > 0) {
+      await admin.database().ref(`insights/${userId}`).set({
+        insights,
+        generatedAt: Date.now(),
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+      });
+    }
+
+    return res.json({
+      userId,
+      anomaliesDetected: anomalies.length,
+      insightsGenerated: insights.length,
+      insights,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// GET endpoint to fetch insights
+router.get('/api/insights', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    // Fetch from Firebase
+    const snapshot = await admin.database().ref(`insights/${userId}`).once('value');
+    const data = snapshot.val();
+
+    if (!data) {
+      return res.json({
+        userId,
+        insights: [],
+        generatedAt: 0,
+        expiresAt: 0,
+      });
+    }
+
+    // Auto-cleanup: Remove insights older than 7 days
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    
+    if (data.insights && data.insights.length > 0) {
+      const activeInsights = data.insights.filter((ins: any) => {
+        const age = now - ins.generatedAt;
+        return age < SEVEN_DAYS_MS;
+      });
+
+      // If any insights were removed, update Firebase
+      if (activeInsights.length !== data.insights.length) {
+        await admin.database().ref(`insights/${userId}`).update({
+          insights: activeInsights,
+          generatedAt: data.generatedAt,
+          expiresAt: data.expiresAt
+        });
+        data.insights = activeInsights;
+      }
+    }
+
+    // Check if expired
+    if (data.expiresAt && data.expiresAt < now) {
+      // Insights expired, trigger regeneration in background (no wait)
+      detectAnomalies(userId)
+        .then(async anomalies => {
+          if (anomalies.length > 0) {
+            const insights = await analyzeAnomaliesWithAI(anomalies);
+            await admin.database().ref(`insights/${userId}`).set({
+              insights,
+              generatedAt: Date.now(),
+              expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+            });
+          }
+        })
+        .catch(err => console.error('Background insight generation failed:', err));
+
+      return res.json({
+        userId,
+        insights: [],
+        generatedAt: 0,
+        expiresAt: 0,
+      });
+    }
+
+    return res.json({
+      userId,
+      insights: data.insights || [],
+      generatedAt: data.generatedAt || 0,
+      expiresAt: data.expiresAt || 0,
+    });
+  } catch (e: any) {
+    console.error('Error fetching insights:', e);
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// Resolve (mark as completed) an insight
+router.post('/api/insights/resolve', async (req, res) => {
+  try {
+    const { userId, insightId } = req.body;
+    if (!userId || !insightId) {
+      return res.status(400).json({ error: 'userId and insightId required' });
+    }
+
+    // Fetch current insights
+    const snapshot = await admin.database().ref(`insights/${userId}`).once('value');
+    const data = snapshot.val();
+
+    if (!data || !data.insights) {
+      return res.status(404).json({ error: 'No insights found' });
+    }
+
+    // Remove the resolved insight
+    const updatedInsights = data.insights.filter((ins: any) => ins.id !== insightId);
+
+    // Save resolved insight to history
+    const resolvedInsight = data.insights.find((ins: any) => ins.id === insightId);
+    if (resolvedInsight) {
+      const historyRef = admin.database().ref(`insights/${userId}/history`);
+      await historyRef.push({
+        ...resolvedInsight,
+        resolvedAt: Date.now(),
+        status: 'resolved'
+      });
+    }
+
+    // Update active insights
+    await admin.database().ref(`insights/${userId}`).update({
+      insights: updatedInsights,
+      generatedAt: data.generatedAt,
+      expiresAt: data.expiresAt
+    });
+
+    return res.json({
+      success: true,
+      message: 'Insight marked as resolved',
+      remainingInsights: updatedInsights.length
+    });
+  } catch (e: any) {
+    console.error('Error resolving insight:', e);
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
+});
+
+// Daily Cron Job: Auto-generate insights for all active users
+router.get('/api/cron/daily-insights', async (req, res) => {
+  // Verify this is from Cloud Scheduler (optional but recommended)
+  const cronHeader = req.get('X-Cloudscheduler');
+  if (!cronHeader && process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Forbidden - Not from Cloud Scheduler' });
+  }
+
+  try {
+    console.log('[CRON] Starting daily insights generation...');
+    
+    // Get all users from Firebase
+    const usersSnapshot = await admin.database().ref('platformConnections').once('value');
+    const usersData = usersSnapshot.val() || {};
+    const userIds = Object.keys(usersData);
+    
+    console.log(`[CRON] Found ${userIds.length} users to process`);
+    
+    let processed = 0;
+    let failed = 0;
+    
+    for (const userId of userIds) {
+      try {
+        // Check if user has any connected platforms
+        const userPlatforms = usersData[userId];
+        const hasConnections = Object.values(userPlatforms || {}).some(
+          (platform: any) => platform?.isConnected === true
+        );
+        
+        if (!hasConnections) {
+          console.log(`[CRON] Skipping ${userId} - no active connections`);
+          continue;
+        }
+        
+        // Detect anomalies
+        const anomalies = await detectAnomalies(userId);
+        
+        if (anomalies.length === 0) {
+          console.log(`[CRON] No anomalies for ${userId}`);
+          processed++;
+          continue;
+        }
+        
+        console.log(`[CRON] Detected ${anomalies.length} anomalies for ${userId}`);
+        
+        // Analyze with AI (top 5 only to save cost)
+        const insights = await analyzeAnomaliesWithAI(anomalies);
+        
+        if (insights.length > 0) {
+          // Save to Firebase
+          await admin.database().ref(`insights/${userId}`).set({
+            insights,
+            generatedAt: Date.now(),
+            expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+          });
+          
+          console.log(`[CRON] Generated ${insights.length} insights for ${userId}`);
+        }
+        
+        processed++;
+        
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+      } catch (error) {
+        console.error(`[CRON] Failed for user ${userId}:`, error);
+        failed++;
+      }
+    }
+    
+    const summary = {
+      timestamp: new Date().toISOString(),
+      totalUsers: userIds.length,
+      processed,
+      failed,
+      message: `Daily insights generation completed`,
+    };
+    
+    console.log('[CRON] Summary:', summary);
+    
+    return res.json(summary);
+    
+  } catch (e: any) {
+    console.error('[CRON] Daily insights job failed:', e);
     return res.status(500).json({ error: e?.message || 'error' });
   }
 });

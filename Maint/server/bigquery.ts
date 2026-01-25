@@ -9,8 +9,11 @@ let _bq: BigQuery | null = null;
 
 export function getBigQuery(): BigQuery {
   if (_bq) return _bq;
-  // Set default location on the client; dataset.get no longer accepts `location` in options
-  _bq = new BigQuery({ location: BQ_LOCATION });
+  // Set default location and projectId on the client
+  _bq = new BigQuery({ 
+    projectId: process.env.GOOGLE_CLOUD_PROJECT || 'maint-ca347',
+    location: BQ_LOCATION 
+  });
   return _bq;
 }
 
