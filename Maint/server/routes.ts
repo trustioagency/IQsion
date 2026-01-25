@@ -6,6 +6,7 @@ import admin from "./firebase";
 import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
 import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, applyRetentionForUserAndSource, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
+import * as hubspot from "./hubspot";
 // Basit fetch timeout helper
 async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -4641,6 +4642,31 @@ router.post('/api/ingest/linkedin-ads', async (req, res) => {
     res.status(500).json({ message: 'LinkedIn ingest failed', error: e?.message || String(e) });
   }
 });
+
+/* ===================== HUBSPOT CRM INTEGRATION (OAuth + API) ===================== */
+// Env vars: HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, HUBSPOT_REDIRECT_URI
+// Stored under connections table with platform='hubspot'
+
+// Initiate HubSpot OAuth
+router.get('/api/auth/hubspot/connect', hubspot.hubspotAuthRedirect);
+
+// HubSpot OAuth callback
+router.get('/api/auth/hubspot/callback', hubspot.hubspotOAuthCallback);
+
+// Get HubSpot contacts
+router.get('/api/hubspot/contacts', hubspot.getHubSpotContacts);
+
+// Get HubSpot deals
+router.get('/api/hubspot/deals', hubspot.getHubSpotDeals);
+
+// Get HubSpot companies
+router.get('/api/hubspot/companies', hubspot.getHubSpotCompanies);
+
+// Test HubSpot connection
+router.get('/api/hubspot/summary', hubspot.testHubSpotConnection);
+
+// Disconnect HubSpot
+router.post('/api/hubspot/disconnect', hubspot.disconnectHubSpot);
 
 // Google Analytics property listesi endpointi
 router.get('/api/analytics/properties', async (req, res) => {

@@ -1195,6 +1195,7 @@ export default function Settings() {
   }
 
   const platformIcons: Record<string, any> = {
+    hubspot: <Database className="w-5 h-5" />,
     shopify: <Building className="w-5 h-5" />,
     meta_ads: <Zap className="w-5 h-5" />,
     google_ads: <Globe className="w-5 h-5" />,
@@ -1205,6 +1206,7 @@ export default function Settings() {
   };
 
   const platforms = [
+    { id: 'hubspot', name: 'HubSpot', description: 'CRM, contacts, deals, and marketing automation' },
     { id: 'shopify', name: 'Shopify', description: 'E-ticaret platformu bağlantısı' },
     { id: 'meta_ads', name: 'Meta Ads', description: 'Facebook ve Instagram reklamları' },
     { id: 'google_ads', name: 'Google Ads', description: 'Google reklam kampanyaları' },
