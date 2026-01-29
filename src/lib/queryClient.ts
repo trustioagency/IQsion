@@ -27,12 +27,6 @@ export async function apiRequest(
   if (requiresAdminKey) {
     try {
       const adminKey = (import.meta as any)?.env?.VITE_ADMIN_API_KEY || '';
-      console.log('[apiRequest] Admin key check:', { 
-        hasKey: !!adminKey, 
-        keyLength: adminKey?.length || 0,
-        url,
-        method 
-      });
       if (adminKey && typeof adminKey === 'string') {
         headers['x-admin-key'] = adminKey;
       }
