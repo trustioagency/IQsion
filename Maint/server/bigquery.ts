@@ -313,6 +313,222 @@ export async function ensureGa4Tables() {
   return { dataset };
 }
 
+// ===== CRM specific tables =====
+export async function ensureCrmTables() {
+  const bq = getBigQuery();
+  const [dataset] = await bq.dataset(BQ_DATASET).get({ autoCreate: true });
+
+  const deals = dataset.table('crm_deals');
+  const [dExists] = await deals.exists();
+  if (!dExists) {
+    await deals.create({
+      schema: {
+        fields: [
+          { name: 'userId', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'source', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'accountId', type: 'STRING' },
+          { name: 'dealId', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'name', type: 'STRING' },
+          { name: 'stage', type: 'STRING' },
+          { name: 'status', type: 'STRING' },
+          { name: 'amount', type: 'FLOAT' },
+          { name: 'currency', type: 'STRING' },
+          { name: 'pipelineId', type: 'STRING' },
+          { name: 'ownerId', type: 'STRING' },
+          { name: 'createdDate', type: 'DATE' },
+          { name: 'updatedDate', type: 'DATE' },
+          { name: 'closeDate', type: 'DATE' },
+          { name: 'isWon', type: 'BOOLEAN' },
+          { name: 'isLost', type: 'BOOLEAN' },
+          { name: 'createdAt', type: 'TIMESTAMP' },
+        ]
+      },
+      timePartitioning: { type: 'DAY', field: 'createdDate', expirationMs: String(BQ_PARTITION_EXPIRATION_DAYS * 86400000) },
+      clustering: { fields: ['userId', 'source', 'accountId'] },
+    } as any);
+  }
+
+  const contacts = dataset.table('crm_contacts');
+  const [cExists] = await contacts.exists();
+  if (!cExists) {
+    await contacts.create({
+      schema: {
+        fields: [
+          { name: 'userId', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'source', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'accountId', type: 'STRING' },
+          { name: 'contactId', type: 'STRING', mode: 'REQUIRED' },
+          { name: 'email', type: 'STRING' },
+          { name: 'firstname', type: 'STRING' },
+          { name: 'lastname', type: 'STRING' },
+          { name: 'companyId', type: 'STRING' },
+          { name: 'lifecycleStage', type: 'STRING' },
+          { name: 'createdDate', type: 'DATE' },
+          { name: 'updatedDate', type: 'DATE' },
+          { name: 'createdAt', type: 'TIMESTAMP' },
+        ]
+      },
+      timePartitioning: { type: 'DAY', field: 'createdDate', expirationMs: String(BQ_PARTITION_EXPIRATION_DAYS * 86400000) },
+      clustering: { fields: ['userId', 'source', 'accountId'] },
+    } as any);
+  }
+
+  return { dataset };
+}
+
+export type CrmDealRow = {
+  userId: string;
+  source: string; // hubspot | pipedrive
+  accountId?: string;
+  dealId: string;
+  name?: string;
+  stage?: string;
+  status?: string;
+  amount?: number;
+  currency?: string;
+  pipelineId?: string;
+  ownerId?: string;
+  createdDate?: string; // YYYY-MM-DD
+  updatedDate?: string; // YYYY-MM-DD
+  closeDate?: string; // YYYY-MM-DD
+  isWon?: boolean;
+  isLost?: boolean;
+  createdAt?: string;
+};
+
+export type CrmContactRow = {
+  userId: string;
+  source: string; // hubspot | pipedrive
+  accountId?: string;
+  contactId: string;
+  email?: string;
+  firstname?: string;
+  lastname?: string;
+  companyId?: string;
+  lifecycleStage?: string;
+  createdDate?: string; // YYYY-MM-DD
+  updatedDate?: string; // YYYY-MM-DD
+  createdAt?: string;
+};
+
+export async function insertCrmDeals(rows: CrmDealRow[]) {
+  if (!rows.length) return { inserted: 0 };
+  const bq = getBigQuery();
+  await ensureCrmTables();
+  const now = new Date().toISOString();
+
+  const values = rows.map(r => {
+    const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
+    const sourceEsc = String(r.source || '').replace(/'/g, "\\'");
+    const accountId = r.accountId ? `'${String(r.accountId).replace(/'/g, "\\'")}'` : 'NULL';
+    const dealId = `'${String(r.dealId || '').replace(/'/g, "\\'")}'`;
+    const name = r.name ? `'${String(r.name).replace(/'/g, "\\'")}'` : 'NULL';
+    const stage = r.stage ? `'${String(r.stage).replace(/'/g, "\\'")}'` : 'NULL';
+    const status = r.status ? `'${String(r.status).replace(/'/g, "\\'")}'` : 'NULL';
+    const amount = r.amount ?? 'NULL';
+    const currency = r.currency ? `'${String(r.currency).replace(/'/g, "\\'")}'` : 'NULL';
+    const pipelineId = r.pipelineId ? `'${String(r.pipelineId).replace(/'/g, "\\'")}'` : 'NULL';
+    const ownerId = r.ownerId ? `'${String(r.ownerId).replace(/'/g, "\\'")}'` : 'NULL';
+    const createdDate = r.createdDate ? `DATE('${r.createdDate}')` : 'NULL';
+    const updatedDate = r.updatedDate ? `DATE('${r.updatedDate}')` : 'NULL';
+    const closeDate = r.closeDate ? `DATE('${r.closeDate}')` : 'NULL';
+    const isWon = typeof r.isWon === 'boolean' ? (r.isWon ? 'TRUE' : 'FALSE') : 'NULL';
+    const isLost = typeof r.isLost === 'boolean' ? (r.isLost ? 'TRUE' : 'FALSE') : 'NULL';
+    const createdAt = `TIMESTAMP('${r.createdAt || now}')`;
+    return `('${userIdEsc}', '${sourceEsc}', ${accountId}, ${dealId}, ${name}, ${stage}, ${status}, ${amount}, ${currency}, ${pipelineId}, ${ownerId}, ${createdDate}, ${updatedDate}, ${closeDate}, ${isWon}, ${isLost}, ${createdAt})`;
+  }).join(',\n      ');
+
+  const mergeSql = `
+    MERGE INTO \`${bq.projectId}.${BQ_DATASET}.crm_deals\` AS target
+    USING (
+      SELECT * FROM UNNEST([
+        STRUCT<userId STRING, source STRING, accountId STRING, dealId STRING, name STRING, stage STRING, status STRING, amount FLOAT64, currency STRING, pipelineId STRING, ownerId STRING, createdDate DATE, updatedDate DATE, closeDate DATE, isWon BOOL, isLost BOOL, createdAt TIMESTAMP>
+        ${values}
+      ])
+    ) AS source
+    ON target.userId = source.userId
+       AND target.source = source.source
+       AND target.dealId = source.dealId
+    WHEN MATCHED THEN
+      UPDATE SET
+        accountId = source.accountId,
+        name = source.name,
+        stage = source.stage,
+        status = source.status,
+        amount = source.amount,
+        currency = source.currency,
+        pipelineId = source.pipelineId,
+        ownerId = source.ownerId,
+        createdDate = source.createdDate,
+        updatedDate = source.updatedDate,
+        closeDate = source.closeDate,
+        isWon = source.isWon,
+        isLost = source.isLost,
+        createdAt = source.createdAt
+    WHEN NOT MATCHED THEN
+      INSERT (userId, source, accountId, dealId, name, stage, status, amount, currency, pipelineId, ownerId, createdDate, updatedDate, closeDate, isWon, isLost, createdAt)
+      VALUES (source.userId, source.source, source.accountId, source.dealId, source.name, source.stage, source.status, source.amount, source.currency, source.pipelineId, source.ownerId, source.createdDate, source.updatedDate, source.closeDate, source.isWon, source.isLost, source.createdAt)
+  `;
+
+  const [job] = await bq.createQueryJob({ query: mergeSql, location: BQ_LOCATION });
+  await job.getQueryResults();
+  return { inserted: rows.length };
+}
+
+export async function insertCrmContacts(rows: CrmContactRow[]) {
+  if (!rows.length) return { inserted: 0 };
+  const bq = getBigQuery();
+  await ensureCrmTables();
+  const now = new Date().toISOString();
+
+  const values = rows.map(r => {
+    const userIdEsc = String(r.userId || '').replace(/'/g, "\\'");
+    const sourceEsc = String(r.source || '').replace(/'/g, "\\'");
+    const accountId = r.accountId ? `'${String(r.accountId).replace(/'/g, "\\'")}'` : 'NULL';
+    const contactId = `'${String(r.contactId || '').replace(/'/g, "\\'")}'`;
+    const email = r.email ? `'${String(r.email).replace(/'/g, "\\'")}'` : 'NULL';
+    const firstname = r.firstname ? `'${String(r.firstname).replace(/'/g, "\\'")}'` : 'NULL';
+    const lastname = r.lastname ? `'${String(r.lastname).replace(/'/g, "\\'")}'` : 'NULL';
+    const companyId = r.companyId ? `'${String(r.companyId).replace(/'/g, "\\'")}'` : 'NULL';
+    const lifecycleStage = r.lifecycleStage ? `'${String(r.lifecycleStage).replace(/'/g, "\\'")}'` : 'NULL';
+    const createdDate = r.createdDate ? `DATE('${r.createdDate}')` : 'NULL';
+    const updatedDate = r.updatedDate ? `DATE('${r.updatedDate}')` : 'NULL';
+    const createdAt = `TIMESTAMP('${r.createdAt || now}')`;
+    return `('${userIdEsc}', '${sourceEsc}', ${accountId}, ${contactId}, ${email}, ${firstname}, ${lastname}, ${companyId}, ${lifecycleStage}, ${createdDate}, ${updatedDate}, ${createdAt})`;
+  }).join(',\n      ');
+
+  const mergeSql = `
+    MERGE INTO \`${bq.projectId}.${BQ_DATASET}.crm_contacts\` AS target
+    USING (
+      SELECT * FROM UNNEST([
+        STRUCT<userId STRING, source STRING, accountId STRING, contactId STRING, email STRING, firstname STRING, lastname STRING, companyId STRING, lifecycleStage STRING, createdDate DATE, updatedDate DATE, createdAt TIMESTAMP>
+        ${values}
+      ])
+    ) AS source
+    ON target.userId = source.userId
+       AND target.source = source.source
+       AND target.contactId = source.contactId
+    WHEN MATCHED THEN
+      UPDATE SET
+        accountId = source.accountId,
+        email = source.email,
+        firstname = source.firstname,
+        lastname = source.lastname,
+        companyId = source.companyId,
+        lifecycleStage = source.lifecycleStage,
+        createdDate = source.createdDate,
+        updatedDate = source.updatedDate,
+        createdAt = source.createdAt
+    WHEN NOT MATCHED THEN
+      INSERT (userId, source, accountId, contactId, email, firstname, lastname, companyId, lifecycleStage, createdDate, updatedDate, createdAt)
+      VALUES (source.userId, source.source, source.accountId, source.contactId, source.email, source.firstname, source.lastname, source.companyId, source.lifecycleStage, source.createdDate, source.updatedDate, source.createdAt)
+  `;
+
+  const [job] = await bq.createQueryJob({ query: mergeSql, location: BQ_LOCATION });
+  await job.getQueryResults();
+  return { inserted: rows.length };
+}
+
 export async function insertGa4Daily(rows: Array<{ userId: string; date: string; propertyId?: string; sessions?: number; avgSessionDurationSec?: number; activeUsers?: number; newUsers?: number; eventCount?: number; bounceRate?: number; createdAt?: string }>) {
   if (!rows.length) return { inserted: 0 };
   

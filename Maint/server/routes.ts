@@ -5,7 +5,10 @@ import fs from "fs";
 import admin from "./firebase";
 import axios from "axios";
 import { GoogleAdsApi } from 'google-ads-api';
-import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, applyRetentionForUserAndSource, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery } from "./bigquery";
+import { ensureDatasetAndTable, insertMetrics, queryByUserAndRange, applyRetentionForUser, applyRetentionForUserAndSource, ensureGa4Tables, insertGa4Daily, insertGa4GeoDaily, getBigQuery, ensureCrmTables, insertCrmDeals, insertCrmContacts } from "./bigquery";
+import { db } from "./db";
+import { platformConnections } from "@shared/schema";
+import { eq, and } from "drizzle-orm";
 import * as hubspot from "./hubspot";
 import * as pipedrive from "./pipedrive";
 // Basit fetch timeout helper
@@ -1698,11 +1701,27 @@ router.get('/api/googleads/accounts', async (req, res) => {
             method: 'GET',
             headers: { Authorization: `Bearer ${effectiveAccessToken}`, 'developer-token': developerToken },
           });
-          if (!r.ok) throw new Error(`listAccessibleCustomers ${version} failed: ${r.status}`);
+          if (!r.ok) {
+            const errText = await r.text().catch(() => '');
+            throw new Error(`listAccessibleCustomers ${version} failed: ${r.status} ${errText.substring(0,200)}`);
+          }
           return (await r.json()) as { resourceNames?: string[] };
         };
-        const j17 = await tryList('v17');
-        const resourceNames = j17.resourceNames || [];
+        
+        // Try v17 first, fallback to v16
+        let j17: any = null;
+        try {
+          j17 = await tryList('v17');
+        } catch (e17) {
+          console.log('[GoogleAds MCC] v17 failed, trying v16:', String(e17).substring(0,150));
+          try {
+            j17 = await tryList('v16');
+          } catch (e16) {
+            console.warn('[GoogleAds MCC] v16 also failed:', String(e16).substring(0,150));
+          }
+        }
+        
+        const resourceNames = j17?.resourceNames || [];
         if (resourceNames.length > 0) {
           // First accessible customer becomes loginCustomerId (usually MCC or primary account)
           const firstId = String(resourceNames[0]).split('/')[1];
@@ -1714,7 +1733,7 @@ router.get('/api/googleads/accounts', async (req, res) => {
           }
         }
       } catch (e) {
-        console.warn('[GoogleAds MCC Auto-detect] failed:', e);
+        console.warn('[GoogleAds MCC Auto-detect] failed:', String(e).substring(0,200));
       }
     }
 
@@ -4417,14 +4436,21 @@ router.get('/api/auth/linkedin/connect', async (req, res) => {
     const redirectUri = (redirectEnv || computed).trim();
     const uid = typeof req.query.userId === 'string' ? req.query.userId : '';
     const stateRaw = uid ? `uid:${uid}|${Math.random().toString(36).slice(2)}` : Math.random().toString(36).slice(2);
-    // Offline access needed for refresh token: use access_type=offline, prompt=consent equivalent for LinkedIn via scope w/ offline_access
-    const scope = [
-      'r_ads',            // read ads accounts
-      'r_ads_reporting',  // read ads analytics
-      'rw_ads',           // manage (future use)
-      'r_basicprofile',   // basic profile (to map user)
-      'offline_access'    // refresh token
-    ].join(' ');
+    // LinkedIn scopes: Ads scopes require app approval. Fallback to basic scopes when not approved.
+    const useAdsScopes = String(process.env.LINKEDIN_USE_ADS_SCOPES || '').toLowerCase() === 'true';
+    const scope = (useAdsScopes
+      ? [
+          'r_ads',            // read ads accounts
+          'r_ads_reporting',  // read ads analytics
+          'rw_ads',           // manage campaigns
+          'r_liteprofile',    // basic profile
+          'r_emailaddress'    // email
+        ]
+      : [
+          'r_liteprofile',
+          'r_emailaddress'
+        ]
+    ).join(' ');
     const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&scope=${encodeURIComponent(scope)}` +
@@ -4838,16 +4864,31 @@ router.get('/api/analytics/properties', async (req, res) => {
 // ===== BigQuery Admin/Test Endpoints (secured) =====
 function requireAdmin(req: express.Request, res: express.Response): boolean {
   const key = process.env.ADMIN_API_KEY;
-  // If admin key is set, enforce it; otherwise allow (needed in production where key may be absent)
-  if (key) {
-    const header = req.header('x-admin-key');
-    if (header !== key) {
-      res.status(403).json({ message: 'forbidden' });
-      return false;
-    }
+  // If no admin key is set, allow all (open for internal use)
+  if (!key || key.trim() === '') {
     return true;
   }
-  return true;
+  
+  // If admin key is set, check it
+  const header = req.header('x-admin-key');
+  
+  console.log('[requireAdmin] DEBUG:', { 
+    envKeyLength: key?.length,
+    envKeyPrefix: key?.substring(0, 10),
+    headerLength: header?.length,
+    headerPrefix: header?.substring(0, 10),
+    match: header === key,
+    ip: req.ip, 
+    xForwardedFor: req.header('x-forwarded-for')
+  });
+  
+  if (header === key) {
+    return true;
+  }
+  
+  console.warn('[requireAdmin] Forbidden - key mismatch');
+  res.status(403).json({ message: 'forbidden' });
+  return false;
 }
 
 router.post('/api/bq/ensure', async (req, res) => {
@@ -5339,6 +5380,8 @@ router.post('/api/ingest/refresh', async (req, res) => {
       'meta_ads': '/api/ingest/meta-ads',
       'google_ads': '/api/ingest/google-ads',
       'shopify': '/api/ingest/shopify',
+      'hubspot': '/api/ingest/hubspot',
+      'pipedrive': '/api/ingest/pipedrive',
     };
     
     const endpoint = platformMap[platform];
@@ -5595,8 +5638,8 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
     const metaPrefs = (userSettings.platforms && userSettings.platforms.meta_ads) || {};
     const defaultInitial = Number(metaPrefs.initialIngestDays || userSettings.initialIngestDays || 30);
     const defaultRetention = Number(metaPrefs.retentionDays || userSettings.retentionDays || process.env.DEFAULT_RETENTION_DAYS || 90);
-    // Türkiye timezone'unda bugünü kullan (UTC yerine)
-    const fallbackEnd = (to && String(to)) || getTurkeyDate(0);
+    // Türkiye timezone'unda DÜNÜ kullan (bugün genelde incomplete olur)
+    const fallbackEnd = (to && String(to)) || getTurkeyDate(-1);
     const windowDays = Math.max(1, (from || meta.lastSyncAt) ? Number(defaultRetention) : Number(defaultInitial));
     const computeStart = () => {
       // windowDays gün geriye + bugün = windowDays+1 günlük veri
@@ -5611,7 +5654,8 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
     const fields = [
       'impressions','clicks','spend','actions','action_values','date_start'
     ].join(',');
-    let url = `https://graph.facebook.com/v19.0/${encodeURIComponent(adAccountId)}/insights?fields=${fields}&level=account&time_increment=1&time_range={"since":"${since}","until":"${until}"}&access_token=${encodeURIComponent(accessToken)}`;
+    const attributionParams = 'use_account_attribution_setting=true&action_report_time=conversion';
+    let url = `https://graph.facebook.com/v19.0/${encodeURIComponent(adAccountId)}/insights?fields=${fields}&level=account&time_increment=1&time_range={"since":"${since}","until":"${until}"}&${attributionParams}&access_token=${encodeURIComponent(accessToken)}`;
     let inserted = 0;
     for (let page = 0; page < 10 && url; page++) {
       const resp = await fetchWithTimeout(url, { method: 'GET' }, 20000);
@@ -5669,6 +5713,189 @@ router.post('/api/ingest/meta-ads', async (req, res) => {
     return res.json({ ok: true, inserted, since, until });
   } catch (e: any) {
     return res.status(500).json({ message: 'Meta Ads ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// ===== HUBSPOT CRM INGEST =====
+router.post('/api/ingest/hubspot', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const uid = String(req.body?.userId || 'test-user');
+    await ensureCrmTables();
+
+    const conn = await db
+      .select()
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, uid), eq(platformConnections.platform, 'hubspot')))
+      .limit(1);
+
+    if (!conn.length || !conn[0].accessToken) {
+      return res.status(404).json({ message: 'HubSpot not connected' });
+    }
+
+    const { accessToken, accountId } = conn[0];
+    const toDateStr = (v: any) => {
+      if (!v) return undefined;
+      const num = Number(v);
+      const d = Number.isFinite(num) ? new Date(num) : new Date(v);
+      if (Number.isNaN(d.getTime())) return undefined;
+      return d.toISOString().slice(0, 10);
+    };
+
+    const fetchAll = async (baseUrl: string) => {
+      const results: any[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 20; page++) {
+        const url = `${baseUrl}&limit=100${after ? `&after=${after}` : ''}`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(JSON.stringify(err));
+        }
+        const j: any = await r.json();
+        results.push(...(j.results || []));
+        after = j?.paging?.next?.after;
+        if (!after) break;
+      }
+      return results;
+    };
+
+    const deals = await fetchAll('https://api.hubapi.com/crm/v3/objects/deals?properties=dealname,amount,dealstage,closedate,createdate,hs_lastmodifieddate,pipeline,hs_is_closed_won,hs_is_closed_lost,hubspot_owner_id');
+    const contacts = await fetchAll('https://api.hubapi.com/crm/v3/objects/contacts?properties=email,firstname,lastname,company,lifecyclestage,createdate,lastmodifieddate');
+
+    const dealRows = deals.map((d: any) => ({
+      userId: uid,
+      source: 'hubspot',
+      accountId: accountId || null,
+      dealId: String(d.id),
+      name: d.properties?.dealname || null,
+      stage: d.properties?.dealstage || null,
+      status: d.properties?.dealstage || null,
+      amount: d.properties?.amount ? Number(d.properties.amount) : null,
+      currency: d.properties?.currency || null,
+      pipelineId: d.properties?.pipeline || null,
+      ownerId: d.properties?.hubspot_owner_id || null,
+      createdDate: toDateStr(d.properties?.createdate),
+      updatedDate: toDateStr(d.properties?.hs_lastmodifieddate),
+      closeDate: toDateStr(d.properties?.closedate),
+      isWon: d.properties?.hs_is_closed_won === 'true',
+      isLost: d.properties?.hs_is_closed_lost === 'true',
+    }));
+
+    const contactRows = contacts.map((c: any) => ({
+      userId: uid,
+      source: 'hubspot',
+      accountId: accountId || null,
+      contactId: String(c.id),
+      email: c.properties?.email || null,
+      firstname: c.properties?.firstname || null,
+      lastname: c.properties?.lastname || null,
+      companyId: c.properties?.company || null,
+      lifecycleStage: c.properties?.lifecyclestage || null,
+      createdDate: toDateStr(c.properties?.createdate),
+      updatedDate: toDateStr(c.properties?.lastmodifieddate),
+    }));
+
+    const insertedDeals = (await insertCrmDeals(dealRows as any)).inserted;
+    const insertedContacts = (await insertCrmContacts(contactRows as any)).inserted;
+
+    return res.json({ ok: true, insertedDeals, insertedContacts });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'HubSpot ingest failed', error: e?.message || 'error' });
+  }
+});
+
+// ===== PIPEDRIVE CRM INGEST =====
+router.post('/api/ingest/pipedrive', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const uid = String(req.body?.userId || 'test-user');
+    await ensureCrmTables();
+
+    const conn = await db
+      .select()
+      .from(platformConnections)
+      .where(and(eq(platformConnections.userId, uid), eq(platformConnections.platform, 'pipedrive')))
+      .limit(1);
+
+    if (!conn.length || !conn[0].accessToken || !conn[0].apiDomain) {
+      return res.status(404).json({ message: 'Pipedrive not connected' });
+    }
+
+    const { accessToken, apiDomain, accountId } = conn[0];
+    const toDateStr = (v: any) => {
+      if (!v) return undefined;
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return undefined;
+      return d.toISOString().slice(0, 10);
+    };
+
+    const fetchAll = async (path: string) => {
+      const results: any[] = [];
+      let start = 0;
+      for (let page = 0; page < 20; page++) {
+        const url = `https://${apiDomain}${path}?start=${start}&limit=100&api_token=${accessToken}`;
+        const r = await fetch(url);
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(JSON.stringify(err));
+        }
+        const j: any = await r.json();
+        results.push(...(j.data || []));
+        const more = j?.additional_data?.pagination?.more_items_in_collection;
+        if (!more) break;
+        start = j?.additional_data?.pagination?.next_start || (start + 100);
+      }
+      return results;
+    };
+
+    const deals = await fetchAll('/v1/deals');
+    const persons = await fetchAll('/v1/persons');
+
+    const dealRows = deals.map((d: any) => ({
+      userId: uid,
+      source: 'pipedrive',
+      accountId: accountId || null,
+      dealId: String(d.id),
+      name: d.title || null,
+      stage: d.stage_id ? String(d.stage_id) : null,
+      status: d.status || null,
+      amount: typeof d.value === 'number' ? d.value : (d.value ? Number(d.value) : null),
+      currency: d.currency || null,
+      pipelineId: d.pipeline_id ? String(d.pipeline_id) : null,
+      ownerId: d.owner_id ? String(d.owner_id) : null,
+      createdDate: toDateStr(d.add_time),
+      updatedDate: toDateStr(d.update_time),
+      closeDate: toDateStr(d.close_time),
+      isWon: d.status === 'won',
+      isLost: d.status === 'lost',
+    }));
+
+    const contactRows = persons.map((p: any) => {
+      const name = p.name || '';
+      const [first, ...rest] = name.split(' ');
+      const email = Array.isArray(p.email) ? p.email?.[0]?.value : p.email;
+      return {
+        userId: uid,
+        source: 'pipedrive',
+        accountId: accountId || null,
+        contactId: String(p.id),
+        email: email || null,
+        firstname: first || null,
+        lastname: rest.length ? rest.join(' ') : null,
+        companyId: p.org_id ? String(p.org_id) : null,
+        lifecycleStage: null,
+        createdDate: toDateStr(p.add_time),
+        updatedDate: toDateStr(p.update_time),
+      };
+    });
+
+    const insertedDeals = (await insertCrmDeals(dealRows as any)).inserted;
+    const insertedContacts = (await insertCrmContacts(contactRows as any)).inserted;
+
+    return res.json({ ok: true, insertedDeals, insertedContacts });
+  } catch (e: any) {
+    return res.status(500).json({ message: 'Pipedrive ingest failed', error: e?.message || 'error' });
   }
 });
 

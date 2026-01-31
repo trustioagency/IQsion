@@ -121,6 +121,24 @@ export async function pipedriveOAuthCallback(req: Request, res: Response) {
       await db.insert(platformConnections).values(connectionData);
     }
 
+    // Trigger initial ingest to BigQuery
+    try {
+      const ingestBase = (process.env.API_URL || process.env.APP_URL || '').trim().replace(/\/$/, '');
+      if (ingestBase) {
+        const adminKey = (process.env.ADMIN_API_KEY || '').trim();
+        fetch(`${ingestBase}/api/ingest/pipedrive`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(adminKey ? { 'x-admin-key': adminKey } : {}),
+          },
+          body: JSON.stringify({ userId }),
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[Pipedrive] ingest trigger failed:', e);
+    }
+
     // Redirect back to settings page
     res.redirect('/settings?pipedrive=success');
   } catch (error) {

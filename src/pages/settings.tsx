@@ -728,6 +728,8 @@ export default function Settings() {
         return;
       }
 
+      console.log('[CONNECT] Redirecting to:', authUrl);
+      
       const platformName = platforms.find(p => p.id === platformId)?.name || platformId;
       toast({
         title: "Yönlendiriliyor",
@@ -735,6 +737,7 @@ export default function Settings() {
       });
 
       setTimeout(() => {
+        console.log('[CONNECT] Executing redirect to:', authUrl);
         window.location.href = authUrl;
       }, 500);
       
@@ -830,6 +833,7 @@ export default function Settings() {
       }
 
       if (!authUrl) {
+        console.error('[CONNECT DIRECT] authUrl is empty for platform:', platformId);
         setIsConnecting(false);
         setLoadingPlatform(null);
         toast({
@@ -839,6 +843,8 @@ export default function Settings() {
         });
         return;
       }
+
+      console.log('[CONNECT DIRECT] Redirecting to:', authUrl);
       
       const platformName = platforms.find(p => p.id === platformId)?.name || platformId;
       toast({
@@ -847,6 +853,7 @@ export default function Settings() {
       });
 
       setTimeout(() => {
+        console.log('[CONNECT DIRECT] Executing redirect to:', authUrl);
         window.location.href = authUrl;
       }, 300);
       
@@ -1335,10 +1342,12 @@ export default function Settings() {
                                       onValueChange={(value) => {
                                         // Eğer property değiştiyse confirmation dialog aç (Meta Ads gibi)
                                         const currentPropertyId = (connections as any)?.google_analytics?.propertyId;
+                                        console.log('GA Property Change:', { currentPropertyId, newValue: value, connections });
                                         
                                         if (currentPropertyId && currentPropertyId !== value) {
                                           const currentProp = (gaProperties?.properties || []).find((p: any) => p.id === currentPropertyId);
                                           const newProp = (gaProperties?.properties || []).find((p: any) => p.id === value);
+                                          console.log('Opening dialog:', { currentProp, newProp });
                                           openAccountChangeDialog(
                                             'google_analytics',
                                             value,
@@ -1347,6 +1356,7 @@ export default function Settings() {
                                           );
                                         } else {
                                           // İlk property seçimi, direkt kaydet
+                                          console.log('First property selection, saving directly');
                                           setSelectedGaPropertyId(value);
                                           handleSaveGoogleAnalyticsProperty(value);
                                         }
